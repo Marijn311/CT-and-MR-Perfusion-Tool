@@ -1,0 +1,5 @@
+# push .nii.gz files via git lfs (to bypass the 100MB limit)
+*.nii.gz filter=lfs diff=lfs merge=lfs -text
+
+
+
