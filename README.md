@@ -1,6 +1,11 @@
+# CT-Report-Generation
+<div align="center">
+  <img src="icon.png" alt="Icon" width="300"/>
+</div>
+
 ## Introduction
 
-This repository provides an open-source Python toolbox for generating perfusion maps from head CTP scans using deconvolution methods. See the attached arXiv paper for an in-depth description of the processing steps and visual comparisons with a FDA-approved toolbox.
+This repository contains PyPeT (Python Perfusion Tool): a open Python toolbox for generating perfusion maps from head CTP scans using deconvolution methods. See the attached arXiv paper for an in-depth description of the processing steps and visual comparisons with a FDA-approved toolbox.
 
 **DISCLAIMER**: This algorithm has **not been formally validated** and is **not intended for clinical use**.
 
@@ -21,11 +26,11 @@ data/
 │           └── sub-<subject_id>_ses-<session_id>_tmax.nii.gz # Time to Maximum
 ```
 
-This toolbox can either generate brain masks using a thresholding and fast-marching approach, or you may provide your own brain mask. For brain extraction you can also consider using [CT_BET](https://github.com/BrainVas/CT_BET), a U-Net based deep learning approach.
+This toolbox can either generate brain masks using a thresholding and fast-marching approach, or you may provide your own brain mask.
 
 ## Citation
 
-If you use this toolbox, please cite: "Free and Open-Source CTP Processing Tool" [insert arXiv DOI]
+If you use this toolbox, please cite: "PyPeT: A Python Tool for Automated Quantitative Brain CT Perfusion Analysis and Visualization" [insert arXiv DOI]
 
 ## References
 
