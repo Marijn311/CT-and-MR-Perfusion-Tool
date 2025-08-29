@@ -7,8 +7,9 @@ import os
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from skimage.metrics import structural_similarity as ssim
 from utils.viewers import show_comparison_maps
+from utils.data_loading import load_image
 
-def compare_perfusion_maps(cbf, cbv, mtt, tmax, com_cbf_path, com_cbv_path, com_mtt_path, com_tmax_path, mask, plot):
+def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_path, gen_tmax_path, com_cbf_path, com_cbv_path, com_mtt_path, com_ttp_path, com_tmax_path, brain_mask_path, plot):
     """
     Compare generated perfusion maps with commercially generated maps.
     
@@ -17,13 +18,15 @@ def compare_perfusion_maps(cbf, cbv, mtt, tmax, com_cbf_path, com_cbv_path, com_
     between the generated and commercial maps for each perfusion parameter.
     
     Parameters:
-        cbf (numpy.ndarray): Generated cerebral blood flow map.
-        cbv (numpy.ndarray): Generated cerebral blood volume map.
-        mtt (numpy.ndarray): Generated mean transit time map.
-        tmax (numpy.ndarray): Generated time to maximum map.
+        gen_cbf_path (str): Path to generated CBF map.
+        gen_cbv_path (str): Path to generated CBV map.
+        gen_mtt_path (str): Path to generated MTT map.
+        gen_ttp_path (str): Path to generated TTP map.
+        gen_tmax_path (str): Path to generated Tmax map.
         com_cbf_path (str): Path to commercially generated CBF map.
         com_cbv_path (str): Path to commercially generated CBV map.
         com_mtt_path (str): Path to commercially generated MTT map.
+        com_ttp_path (str): Path to commercially generated TTP map.
         com_tmax_path (str): Path to commercially generated Tmax map.
         mask (SimpleITK.Image): Brain mask used for comparison and normalization.
         plot (bool): If True, displays comparison plots for each perfusion map.
@@ -33,59 +36,79 @@ def compare_perfusion_maps(cbf, cbv, mtt, tmax, com_cbf_path, com_cbv_path, com_
               for each perfusion map type (cbf, cbv, mtt, tmax).
     """
 
-    mask = sitk.GetArrayFromImage(mask)
 
-    # Load commercially generated maps
-    com_cbf_img = nib.load(com_cbf_path)
-    com_cbv_img = nib.load(com_cbv_path)
-    com_mtt_img = nib.load(com_mtt_path)
-    com_tmax_img = nib.load(com_tmax_path)
+    # Load the generated images
+    cbf = load_image(gen_cbf_path)
+    cbv = load_image(gen_cbv_path)
+    mtt = load_image(gen_mtt_path)
+    ttp = load_image(gen_ttp_path)
+    tmax = load_image(gen_tmax_path)
 
-    # Reorient to ras+ (to match generated maps)
-    com_cbf_img = nib.as_closest_canonical(com_cbf_img)
-    com_cbv_img = nib.as_closest_canonical(com_cbv_img)
-    com_mtt_img = nib.as_closest_canonical(com_mtt_img)
-    com_tmax_img = nib.as_closest_canonical(com_tmax_img)
+    #load the mask
+    mask = load_image(brain_mask_path)
+
+    # Check which commercial files exist and load only available ones
+    commercial_paths = {
+        'cbf': com_cbf_path,
+        'cbv': com_cbv_path,
+        'mtt': com_mtt_path,
+        'ttp': com_ttp_path,
+        'tmax': com_tmax_path
+    }
     
-    # Get the data arrays
-    com_cbf = com_cbf_img.get_fdata()
-    com_cbv = com_cbv_img.get_fdata()
-    com_mtt = com_mtt_img.get_fdata()
-    com_tmax = com_tmax_img.get_fdata()
-    
-    # Transpose commercial maps to match the orientation of the generated maps (slices, height, width)
-    if com_cbf.ndim == 3:
-        com_cbf = np.transpose(com_cbf, (2, 1, 0))
-        com_cbv = np.transpose(com_cbv, (2, 1, 0))
-        com_mtt = np.transpose(com_mtt, (2, 1, 0))
-        com_tmax = np.transpose(com_tmax, (2, 1, 0))
+    available_commercial = {}
+    for map_type, path in commercial_paths.items():
+        if os.path.exists(path):
+            img = nib.load(path)
+            available_commercial[map_type] = img
+        else:
+            print(f"Warning: Commercial {map_type.upper()} map not found: {path}")
 
-    # Normalize the commercial maps with their own whole brain mean, to match the normalization of generated maps
-    com_cbf_mean = com_cbf[mask == 1].mean()
-    com_cbv_mean = com_cbv[mask == 1].mean()
-    com_mtt_mean = com_mtt[mask == 1].mean()
-    com_tmax_mean = com_tmax[mask == 1].mean()
-    com_cbf = (com_cbf - com_cbf_mean) / com_cbf_mean
-    com_cbv = (com_cbv - com_cbv_mean) / com_cbv_mean
-    com_mtt = (com_mtt - com_mtt_mean) / com_mtt_mean
-    com_tmax = (com_tmax - com_tmax_mean) / com_tmax_mean
+    # Reorient available commercial maps to ras+ (to match generated maps)
+    for map_type in available_commercial:
+        available_commercial[map_type] = nib.as_closest_canonical(available_commercial[map_type])
+    
+    # Get the data arrays for available commercial maps
+    commercial_data = {}
+    for map_type, img in available_commercial.items():
+        data = img.get_fdata()
+        # Transpose commercial maps to match the orientation of the generated maps (slices, height, width)
+        if data.ndim == 3:
+            data = np.transpose(data, (2, 1, 0))
+        commercial_data[map_type] = data
+
+    # Normalize the available commercial maps with their own whole brain mean
+    # Since this was done to the generated maps, we need to ensure both are on the same scale.
+    # This also help the image to look more similar visually if we dont want to tune the parameters that determine the absolute values.
+    for map_type, data in commercial_data.items():
+        mean_val = data[mask == 1].mean()
+        commercial_data[map_type] = (data - mean_val) / mean_val
 
     # Define perfusion maps for comparison
-    perfusion_maps = [
-        ('cbf', cbf, com_cbf),
-        ('cbv', cbv, com_cbv),
-        ('mtt', mtt, com_mtt),
-        ('tmax', tmax, com_tmax)
-    ]
+    generated_maps = {
+        'cbf': cbf,
+        'cbv': cbv,
+        'mtt': mtt,
+        'ttp': ttp,
+        'tmax': tmax
+    }
     
-    # Calculate and display similarity metrics for each map type
+    perfusion_maps = []
+    for map_type in available_commercial:
+        if map_type in generated_maps:
+            perfusion_maps.append((map_type, generated_maps[map_type], commercial_data[map_type]))
+    
+    # Calculate and display similarity metrics for each available map type
     all_metrics = {}
+    
+    print(f"\nComparing {len(perfusion_maps)} available perfusion map(s)...")
+    
     for map_name, generated, commercial in perfusion_maps:
-        print(f"\n{map_name} Comparison:")
+        print(f"\n{map_name.upper()} Comparison:")
         print("-" * 30)
         
         # Calculate similarity metrics
-        metrics = calculate_similarity_metrics(generated, commercial, mask, apply_mask_to_commercial=True)
+        metrics = calculate_similarity_metrics(generated, commercial, mask, apply_mask=True)
         all_metrics[map_name] = metrics
         
         # Display metrics
@@ -97,12 +120,12 @@ def compare_perfusion_maps(cbf, cbv, mtt, tmax, com_cbf_path, com_cbv_path, com_
         
         # Display side-by-side comparison
         if plot:
-            show_comparison_maps(generated, commercial, map_name, mask, apply_mask_to_commercial=False)
+            show_comparison_maps(generated, commercial, map_name, mask, apply_mask=False)
 
     return all_metrics
 
 
-def calculate_similarity_metrics(generated, commercial, mask, apply_mask_to_commercial):
+def calculate_similarity_metrics(generated, commercial, mask, apply_mask):
     """Calculate comprehensive similarity metrics between generated and commercial perfusion maps.
     This function computes multiple similarity metrics (NCC, SSIM, MSE, MAE, RMSE) between 
     two perfusion maps while handling different brain masks and background values appropriately.
@@ -117,9 +140,9 @@ def calculate_similarity_metrics(generated, commercial, mask, apply_mask_to_comm
     mask : numpy.ndarray
         Binary brain mask (same shape as input maps) where 1 indicates brain tissue 
         and 0 indicates background.
-    apply_mask_to_commercial : bool
-        If True, applies the mask to the commercial map for fair comparison.
-        If False, automatically detects and masks the background using mode value.
+    apply_mask : bool
+        If True, applies a mask to make sure we only consider pixels which are non-background in both images.
+
     Returns
     -------
     dict
@@ -136,19 +159,18 @@ def calculate_similarity_metrics(generated, commercial, mask, apply_mask_to_comm
             Root Mean Squared Error    
     """
 
-    # The commercial maps and the maps generated by this toolbox have different brain masks.
-    # To make the comparison more fair, we mask the commercial maps with the generated maps.
-    if apply_mask_to_commercial==True:
-        commercial = commercial * mask
+    # Find the mode and set it to NaN. This mode value is the background value.
+    mode_commercial = scipy.stats.mode(commercial.flatten()).mode
+    commercial_masked = np.where(commercial == mode_commercial, np.nan, commercial)
+    mode_generated = scipy.stats.mode(generated.flatten()).mode
+    generated_masked = np.where(generated == mode_generated, np.nan, generated)
 
-    # Set background to NaN for both volumes to ensure calculation are not done on the background
-    generated_masked = np.where(mask > 0, generated, np.nan)
-    if apply_mask_to_commercial==True:
+    # The commercial and generated maps have different brain masks.
+    # We only use the pixels which are not nan in both images.
+    if apply_mask==True:
+        mask = np.where(np.isfinite(commercial_masked) & np.isfinite(generated_masked), 1, 0)
+        generated_masked = np.where(mask > 0, generated, np.nan)
         commercial_masked = np.where(mask > 0, commercial, np.nan)
-    else:
-        # Find the mode and set it to NaN. This mode value is the background value.
-        mode_value = scipy.stats.mode(commercial.flatten()).mode
-        commercial_masked = np.where(commercial == mode_value, np.nan, commercial)
 
     # Flatten arrays
     gen_flat = generated_masked.flatten()
@@ -166,7 +188,7 @@ def calculate_similarity_metrics(generated, commercial, mask, apply_mask_to_comm
     
     # Calculate SSIM
     # Replace NaN and infinite values with 0 for SSIM calculation
-    # SSIM requires finite values, so we convert NaN/inf to 0 which represents background
+    # SSIM requires 2d images with finite values, so we convert NaN/inf to 0 which represents background
     # Note that the SSIM willl be quite high because we are comparing the same background values.
     generated_masked = np.where(np.isfinite(generated_masked), generated_masked, 0)
     commercial_masked = np.where(np.isfinite(commercial_masked), commercial_masked, 0)
@@ -199,11 +221,17 @@ def average_metrics_on_dataset(all_metrics):
 
     """ 
     
-    # Get all perfusion map types from the first subject
-    map_types = list(all_metrics[0].keys())
+    # Filter out empty dictionaries (subjects with no commercial maps)
+    valid_metrics = [metrics for metrics in all_metrics if metrics]
     
-    # Get all similarity metrics from the first subject's first map type
-    similarity_metrics = list(all_metrics[0][map_types[0]].keys())
+    print(f"Averaging metrics across {len(valid_metrics)} subjects with available commercial maps "
+          f"(out of {len(all_metrics)} total subjects).")
+    
+    # Get all perfusion map types from the first valid subject
+    map_types = list(valid_metrics[0].keys())
+    
+    # Get all similarity metrics from the first valid subject's first map type
+    similarity_metrics = list(valid_metrics[0][map_types[0]].keys())
     
     averaged_metrics = {}
     
@@ -211,15 +239,23 @@ def average_metrics_on_dataset(all_metrics):
         averaged_metrics[map_type] = {}
         
         for sim_metric in similarity_metrics:
-            # Extract values for this specific metric across all subjects
-            values = [subject[map_type][sim_metric] for subject in all_metrics]
+            # Extract values for this specific metric across all valid subjects
+            # Only include subjects that have this specific map type
+            values = []
+            for subject in valid_metrics:
+                if map_type in subject:
+                    values.append(subject[map_type][sim_metric])
             
-            # Calculate statistics
-            averaged_metrics[map_type][sim_metric] = {
-                'mean': np.mean(values),
-                'median': np.median(values),
-                'std': np.std(values)
-            }
+            if values:  # Only calculate if we have values
+                # Calculate statistics
+                averaged_metrics[map_type][sim_metric] = {
+                    'mean': np.mean(values),
+                    'median': np.median(values),
+                    'std': np.std(values),
+                    'count': len(values)  # Add count to show how many subjects contributed
+                }
+            else:
+                print(f"Warning: No values found for {map_type} {sim_metric}")
     
     # Print results to screen
     print("\n" + "="*80)
@@ -227,30 +263,39 @@ def average_metrics_on_dataset(all_metrics):
     print("="*80)
     
     for map_type in map_types:
-        print(f"\n{map_type.upper()}:")
-        print("-" * 50)
-        
-        for sim_metric in similarity_metrics:
-            stats = averaged_metrics[map_type][sim_metric]
-            print(f"  {sim_metric.upper():5s}: Mean={stats['mean']:.3f}, "
-                  f"Median={stats['median']:.3f}, Std={stats['std']:.3f}")
+        if map_type in averaged_metrics:
+            print(f"\n{map_type.upper()}:")
+            print("-" * 50)
+            
+            for sim_metric in similarity_metrics:
+                if sim_metric in averaged_metrics[map_type]:
+                    stats = averaged_metrics[map_type][sim_metric]
+                    print(f"  {sim_metric.upper():5s}: Mean={stats['mean']:.3f}, "
+                          f"Median={stats['median']:.3f}, Std={stats['std']:.3f}, "
+                          f"N={stats['count']}")
     
     # Save results to Excel file
     rows = []
     for map_type in map_types:
-        for sim_metric in similarity_metrics:
-            stats = averaged_metrics[map_type][sim_metric]
-            rows.append({
-                'Map_Type': map_type,
-                'Similarity_Metric': sim_metric,
-                'Mean': stats['mean'],
-                'Median': stats['median'],
-                'Std': stats['std']
-            })
+        if map_type in averaged_metrics:
+            for sim_metric in similarity_metrics:
+                if sim_metric in averaged_metrics[map_type]:
+                    stats = averaged_metrics[map_type][sim_metric]
+                    rows.append({
+                        'Map_Type': map_type,
+                        'Similarity_Metric': sim_metric,
+                        'Mean': stats['mean'],
+                        'Median': stats['median'],
+                        'Std': stats['std'],
+                        'Count': stats['count']
+                    })
     
-    df = pd.DataFrame(rows)
-    output_file = 'averaged_similarity_metrics_for_comparison.xlsx'
-    df.to_excel(output_file, index=False)
-    print(f"\nResults saved to: {output_file}")
+    if rows:
+        df = pd.DataFrame(rows)
+        output_file = 'averaged_similarity_metrics_for_comparison.xlsx'
+        df.to_excel(output_file, index=False)
+        print(f"\nResults saved to: {output_file}")
+    else:
+        print("\nNo results to save.")
     
     return averaged_metrics

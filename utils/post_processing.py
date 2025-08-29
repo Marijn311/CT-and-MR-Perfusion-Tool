@@ -1,4 +1,3 @@
-from scipy.ndimage import gaussian_filter
 import SimpleITK as sitk
 
 
@@ -18,8 +17,5 @@ def post_process_perfusion_map(generated_volume, mask, img_name):
     # This also helps to get the commercial and generated maps in the same range for visual comparison.
     gen_mean = generated_volume[mask == 1].mean()
     generated_volume = (generated_volume - gen_mean) / gen_mean
-
-    if img_name == "TMAX":
-        generated_volume = gaussian_filter(generated_volume, sigma=1.0)
 
     return generated_volume

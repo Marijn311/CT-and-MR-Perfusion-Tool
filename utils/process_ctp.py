@@ -46,7 +46,7 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
     # Step 1: Read-in the 4D CTP .nii.gz scans, returns a list of 3D SITK images and corresponding time indices
     # ---------------------------------------------------------------------------------
     
-    img_list, time_index = load_ctp(ctp_path)
+    img_list, time_index = load_image(ctp_path)
 
     # Convert time index to seconds. For this we need to know the scan interval.
     time_index = [i * SCAN_INTERVAL for i in time_index]
@@ -57,6 +57,7 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
     # ---------------------------------------------------------------------------------
     # Step 2: Image preprocessing (smoothing and masking)
     # ---------------------------------------------------------------------------------
+
 
     # Smooth the input image while keeping edges intact.
     # TODO This is slow because we need to smooth many 3D volumes. Is there a way to speed this up?
@@ -72,7 +73,10 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
         sitk.WriteImage(brain_mask, os.path.join(os.path.dirname(ctp_path), 'brain_mask.nii.gz'))
     else:
         brain_mask = load_brain_mask(brain_mask_path, smooth_img)
-
+    
+    brain_mask = generate_brain_mask(smooth_img)
+    sitk.WriteImage(brain_mask, os.path.join(os.path.dirname(ctp_path), 'brain_mask.nii.gz'))
+    
     """
     Currently, we use a single 3D brain mask to mask the entire 4D CTP scan.
     However, if the patient moves during the scan, this mask may no longer allign with all 3D volumes.
@@ -137,7 +141,7 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
         show_perfusion_map(tmax, "TMAX")
 
     # ---------------------------------------------------------------------------------
-    # Step 7: Post-processing (Smoothing and whole brain normalization)
+    # Step 7: Post-processing (Whole brain normalization)
     # ---------------------------------------------------------------------------------
     
     ttp = post_process_perfusion_map(ttp, brain_mask, "TTP")
@@ -164,4 +168,4 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
     nib.save(cbf_nii, os.path.join(os.path.dirname(ctp_path), "perfusion-maps", 'foss_cbf.nii.gz'))
     nib.save(tmax_nii, os.path.join(os.path.dirname(ctp_path), "perfusion-maps", 'foss_tmax.nii.gz'))
 
-    return cbf, cbv, mtt, tmax, brain_mask
+    return cbf, cbv, mtt, ttp, tmax, brain_mask
