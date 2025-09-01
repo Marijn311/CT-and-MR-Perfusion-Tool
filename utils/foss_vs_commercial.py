@@ -1,13 +1,12 @@
 import numpy as np
-import nibabel as nib
 import scipy.stats
-import SimpleITK as sitk
 import pandas as pd
 import os
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from skimage.metrics import structural_similarity as ssim
 from utils.viewers import show_comparison_maps
 from utils.data_loading import load_image
+from scipy.ndimage import binary_erosion
 
 def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_path, gen_tmax_path, com_cbf_path, com_cbv_path, com_mtt_path, com_ttp_path, com_tmax_path, brain_mask_path, plot):
     """
@@ -45,7 +44,7 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
     tmax = load_image(gen_tmax_path)
 
     #load the mask
-    mask = load_image(brain_mask_path)
+    brain_mask = load_image(brain_mask_path)
 
     # Check which commercial files exist and load only available ones
     commercial_paths = {
@@ -59,30 +58,28 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
     available_commercial = {}
     for map_type, path in commercial_paths.items():
         if os.path.exists(path):
-            img = nib.load(path)
+            img = load_image(path)
             available_commercial[map_type] = img
         else:
             print(f"Warning: Commercial {map_type.upper()} map not found: {path}")
-
-    # Reorient available commercial maps to ras+ (to match generated maps)
-    for map_type in available_commercial:
-        available_commercial[map_type] = nib.as_closest_canonical(available_commercial[map_type])
     
     # Get the data arrays for available commercial maps
     commercial_data = {}
     for map_type, img in available_commercial.items():
-        data = img.get_fdata()
-        # Transpose commercial maps to match the orientation of the generated maps (slices, height, width)
-        if data.ndim == 3:
-            data = np.transpose(data, (2, 1, 0))
-        commercial_data[map_type] = data
+        commercial_data[map_type] = img
 
     # Normalize the available commercial maps with their own whole brain mean
-    # Since this was done to the generated maps, we need to ensure both are on the same scale.
-    # This also help the image to look more similar visually if we dont want to tune the parameters that determine the absolute values.
-    for map_type, data in commercial_data.items():
-        mean_val = data[mask == 1].mean()
-        commercial_data[map_type] = (data - mean_val) / mean_val
+    # This was also done to the generated maps.
+    # This helps the image to look more similar visually if we dont want to tune the parameters that determine the absolute values.
+    for map_type, img in commercial_data.items():
+       
+        # Erode the brain mask with a flat kernel
+        # Due to the patient motion, skull can fall inside the mask at the edges.
+        # to get a more stable result we shrink the mask a bit before extracting the mean.
+        kernel = np.ones((1, 10, 10), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
+        brain_mask = binary_erosion(brain_mask, kernel)
+        mean_val = img[brain_mask == 1].mean()
+        commercial_data[map_type] = (img - mean_val) / mean_val
 
     # Define perfusion maps for comparison
     generated_maps = {
@@ -108,7 +105,7 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
         print("-" * 30)
         
         # Calculate similarity metrics
-        metrics = calculate_similarity_metrics(generated, commercial, mask, apply_mask=True)
+        metrics = calculate_similarity_metrics(generated, commercial, brain_mask, apply_mask=True)
         all_metrics[map_name] = metrics
         
         # Display metrics
@@ -120,7 +117,7 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
         
         # Display side-by-side comparison
         if plot:
-            show_comparison_maps(generated, commercial, map_name, mask, apply_mask=False)
+            show_comparison_maps(generated, commercial, map_name, brain_mask, apply_mask=False)
 
     return all_metrics
 

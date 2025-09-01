@@ -1,9 +1,8 @@
 from scipy.linalg import toeplitz
-import SimpleITK as sitk
 import numpy as np
 from utils.aif import gv
 
-def extract_ctc(img_list, brain_mask, hu_threshold=150, ratio_threshold=0.05):
+def extract_ctc(volume_list, brain_mask, hu_threshold=150, ratio_threshold=0.05):
     """
     Extracts the Contrast Time Curve (CTC) from a sequence of CTP images.
 
@@ -13,7 +12,7 @@ def extract_ctc(img_list, brain_mask, hu_threshold=150, ratio_threshold=0.05):
     subtracts the baseline to isolate the contrast enhancement signal.
 
     Parameters:
-        img_list (list of SimpleITK.Image): A list of raw CTP images representing a time series.
+        volume_list (list of SimpleITK.Image): A list of raw CTP images representing a time series.
         brain_mask (SimpleITK.Image): A binary mask indicating the brain region in the images.
         hu_threshold (int, optional): The Hounsfield Unit (HU) threshold to identify contrast agent presence. 
                                     Defaults to 150.
@@ -26,18 +25,16 @@ def extract_ctc(img_list, brain_mask, hu_threshold=150, ratio_threshold=0.05):
                                         (raw signal minus averaged pre-contrast baseline).
             - s0_index (int): The starting index of significant contrast agent presence.
     """
-    # Convert the list of SimpleITK images to a NumPy array
-    img_np = np.stack([sitk.GetArrayFromImage(img) for img in img_list])
-    brain_mask = sitk.GetArrayFromImage(brain_mask)
 
     # For each timepoint, store the amount of contrast agent that is present in the volume
     total_contrast_value = []
     
     # Iterate through each time point in the image series
-    for t in range(img_np.shape[0]):
+    nr_timepoints = len(volume_list)
+    for t in range(nr_timepoints):
         
         # Get the current volume at time point t
-        current_volume = img_np[t]
+        current_volume = volume_list[t]
 
         # Extract the pixels which we deem to be part of the contrast signal. 
         # To be part of the contrast signal, pixels must be above the HU threshold and within the brain mask.
@@ -49,9 +46,6 @@ def extract_ctc(img_list, brain_mask, hu_threshold=150, ratio_threshold=0.05):
         
         # Add this volume's contrast sum to the list
         total_contrast_value.append(volume_contrast_sum)
-    
-    # Convert to numpy array
-    total_contrast_value = np.array(total_contrast_value) 
 
     # Normalize the total contrast agent value by the first volume, to remove the baseline
     total_contrast_value = (total_contrast_value - total_contrast_value[0]) / total_contrast_value[0]
@@ -64,15 +58,22 @@ def extract_ctc(img_list, brain_mask, hu_threshold=150, ratio_threshold=0.05):
     s0_index = cands[0]
     
     # Average the volumes before the contrast agent starts to appear, to make a more stable baseline (S0)
-    s0_img_np = img_np[:s0_index].mean(axis=0)
+    volumes = np.stack(volume_list, axis=0)
+    s0 = volumes[:s0_index,:,:,:].mean(axis=0)
     
     # Remove the baseline signal S0 from the images
     # This leaves us with the contrast agent signal only
-    img_np = img_np - s0_img_np
-    img_np[img_np<0] = 0
+    volumes = volumes - s0[np.newaxis, :, :, :]
+    volumes[volumes < 0] = 0
     
-    return img_np, s0_index
-    
+    # Apply the brain mask
+    volumes = volumes * brain_mask[np.newaxis, :, :, :]
+
+    # Unstack back into a list of 3d arrays
+    volume_list = [volumes[i] for i in range(volumes.shape[0])]
+
+    return volume_list, s0_index
+
 def generate_ttp(ctc_img, time_index, s0_index, brain_mask, outside_value=-1):
     """
     Calculate Time to Peak (TTP) from contrast time curve data.
@@ -107,19 +108,21 @@ def generate_ttp(ctc_img, time_index, s0_index, brain_mask, outside_value=-1):
         at which peak enhancement occurs for each voxel. Voxels outside 
         the brain mask are set to outside_value.
     """
+    # Convert the list of 3d volumes to one 4d array
+    ctc_img = np.stack(ctc_img, axis=0)
     time_index = np.array(time_index)
-    
+
     # Filter time indices starting from s0_index and adjust relative to start time
-    time_index_filtered = time_index[s0_index:] - time_index[s0_index]
+    time_index = time_index[s0_index:] - time_index[s0_index]
 
     # Filter contrast data to exclude baseline measurements
-    ctc_img_filtered = ctc_img[s0_index:]
+    ctc_img = ctc_img[s0_index:, :, :, :]
 
     # Find time to peak by getting time index of maximum enhancement for each voxel
-    ttp = time_index_filtered[ctc_img_filtered.argmax(axis=0)]
-    
+    ttp = time_index[ctc_img.argmax(axis=0)]
+
     # Set voxels outside brain mask to specified outside value
-    ttp[sitk.GetArrayFromImage(brain_mask) == 0] = outside_value
+    ttp[brain_mask == 0] = outside_value
     
     return ttp
 
@@ -141,8 +144,7 @@ def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cS
         4D array of tissue concentration curves with shape (time, z, y, x)
     time_index : list or numpy.ndarray
         Time points corresponding to the temporal dimension of ctc_img
-    brain_mask : sitk.Image or numpy.ndarray
-        Binary mask defining brain tissue regions (1 = brain, 0 = background)
+    brain_mask : Binary mask defining brain tissue regions (1 = brain, 0 = background)
     aif_propperties : list or numpy.ndarray
         Arterial input function values or fitting parameters for AIF estimation
     cSVD_thres : float, optional
@@ -168,11 +170,6 @@ def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cS
     - Block-circulant methods (bcSVD1, bcSVD2) pad the data to reduce boundary artifacts
     - All output maps are masked using the provided brain_mask
     """
-    # Convert brain mask to numpy array if it's a SimpleITK image
-    if type(brain_mask) is sitk.Image:
-        brain_mask = sitk.GetArrayFromImage(brain_mask)
-    else:
-        brain_mask = brain_mask
         
     # Define tissue constants: density (g/ml) and hematocrit correction factor
     rho, H = 1.05, 0.85

@@ -4,7 +4,7 @@ from scipy.ndimage import binary_dilation, binary_erosion
 import cc3d
 import traceback
 import pandas as pd
-import SimpleITK as sitk
+
 
 
 def gv(t, t0, alpha, beta):
@@ -60,16 +60,14 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
         peak difference, and fitting error.
     """
 
-    brain_mask_sitk = brain_mask
-    
-    # Convert the brain mask to a NumPy array
-    brain_mask = sitk.GetArrayFromImage(brain_mask)
-
     # Erode the brain mask with a flat kernel
     # Due to the patient motion, skull can fall inside the mask at the edges. We want to prevent the skull from being seleted as AIF
-    kernel = np.ones((1, 8, 8), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
+    kernel = np.ones((1, 10, 10), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
     brain_mask = binary_erosion(brain_mask, kernel)
-    
+
+    # Convert the list of 3D volumes to a 4D array
+    ctc_img = np.stack(ctc_img, axis=0)
+
     # Get AUC and TTP distributions
     auc_values = ctc_img.sum(0)[brain_mask > 0]
     ttp_values = ttp[brain_mask > 0]
@@ -126,7 +124,7 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
             peak_difference = np.max(curve_mean) - np.mean(curve_mean[-3:])  # Difference between peak and end values of the curve
 
             # Skip candidates with volume exceeding the threshold
-            if vol * np.prod(brain_mask_sitk.GetSpacing()) > cand_vol_thres:
+            if vol > cand_vol_thres:
                 continue
 
             try:
@@ -143,7 +141,7 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
             # Append candidate properties to the list
             cands.append({
                 'idx': idx,
-                'vol': vol * np.prod(brain_mask_sitk.GetSpacing()),
+                'vol': vol,
                 'popts': popts,
                 'mean_error': err.mean(),
                 'max_error': err.max(),

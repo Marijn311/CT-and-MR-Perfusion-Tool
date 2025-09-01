@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import SimpleITK as sitk
 import scipy
 from utils.aif import gv
 
@@ -18,27 +17,26 @@ def view_4d_img(img_list, title, window=(200, 500)):
     processed_mip_volumes = []
     processed_original_volumes = []
     
-    for im in img_list:
+    for img in img_list:
+        
         # Maximum intensity projection from the middle third of the volume
-        imSlice_mip = sitk.IntensityWindowing(
-            sitk.MaximumProjection(im[:, :, im.GetDepth()//3:im.GetDepth()*2//3], 2)[:, :, 0],
-            window[0]-window[1]/2, window[0]+window[1]/2, 0, 255
-        )
+        img_array = np.array(img)
+        depth = img_array.shape[0]
+        middle_third = img_array[depth//3:depth*2//3, :, :]
+        mip = np.max(middle_third, axis=0)
         
+        # Apply intensity windowing to MIP
+        mip_windowed = np.clip((mip - (window[0] - window[1]/2)) / window[1] * 255, 0, 255)
+        middle_slice_mip = mip_windowed.astype('uint8')
+       
         # Original image - take middle slice
-        middle_slice = im.GetDepth() // 2
-        imSlice_original = sitk.IntensityWindowing(
-            im[:, :, middle_slice],
-            window[0]-window[1]/2, window[0]+window[1]/2, 0, 255
-        )
-        
-        imSlice_mip_array = sitk.GetArrayFromImage(imSlice_mip).astype('uint8')
-        imSlice_original_array = sitk.GetArrayFromImage(imSlice_original).astype('uint8')
-        
-        processed_mip_volumes.append(imSlice_mip_array)
-        processed_original_volumes.append(imSlice_original_array)
-        all_mip_values.extend(imSlice_mip_array.flatten())
-        all_original_values.extend(imSlice_original_array.flatten())
+        middle_slice_idx = img_array.shape[0] // 2
+        middle_slice_original = img[middle_slice_idx, :, :,]
+
+        processed_mip_volumes.append(middle_slice_mip)
+        processed_original_volumes.append(middle_slice_original)
+        all_mip_values.extend(middle_slice_mip.flatten())
+        all_original_values.extend(middle_slice_original.flatten())
     
     mip_vmin, mip_vmax = np.percentile(all_mip_values, [2, 98])
     original_vmin, original_vmax = np.percentile(all_original_values, [2, 98])
@@ -91,44 +89,40 @@ def view_4d_img(img_list, title, window=(200, 500)):
 
 
 
-def view_brain_mask(brain_mask, img):
+def view_brain_mask(brain_mask, volume_list):
     """
-    Visualize the brain mask, the corresponding smoothed images, and the masked images side by side.
+    Visualize the brain mask, the corresponding smoothed volume, and the masked volume side by side.
     """
 
-    # Select the first timepoint
-    img=img[0]
-
-    # Convert the brain mask and images to numpy arrays
-    brain_mask_array = sitk.GetArrayFromImage(brain_mask)
-    img_array = sitk.GetArrayFromImage(img)
+    # Select the first volume
+    volume=volume_list[0]
     
     # Apply the mask to the images and set background to -1000
-    masked_img_array = np.where(brain_mask_array > 0, img_array, -1000)
+    masked_volume_array = np.where(brain_mask > 0, volume, -1000)
 
     # Pre-calculate vmin and vmax for all volumes to ensure consistent scaling
-    mask_vmin, mask_vmax = np.percentile(brain_mask_array, [2, 98])
-    img_vmin, img_vmax = np.percentile(img_array, [2, 98])
-    masked_vmin, masked_vmax = np.min(masked_img_array[masked_img_array != -1000]), np.max(masked_img_array[masked_img_array != -1000])
+    mask_vmin, mask_vmax = np.percentile(brain_mask, [2, 98])
+    volume_vmin, volume_vmax = np.percentile(volume, [2, 98])
+    masked_vmin, masked_vmax = np.min(masked_volume_array[masked_volume_array != -1000]), np.max(masked_volume_array[masked_volume_array != -1000])
 
     # Create a figure with three subplots
-    fig, (ax_mask, ax_img, ax_masked) = plt.subplots(1, 3, figsize=(15, 5))
+    fig, (ax_mask, ax_volume, ax_masked) = plt.subplots(1, 3, figsize=(15, 5))
 
     current_slice = 0
 
     def update_slice(new_slice):
         nonlocal current_slice
-        current_slice = max(0, min(new_slice, brain_mask_array.shape[0] - 1))
-        mask_display.set_data(brain_mask_array[current_slice])
-        img_display.set_data(img_array[current_slice])
-        masked_display.set_data(masked_img_array[current_slice])
-        ax_mask.set_title(f"3D Brain Mask\n(Scroll Through Slices)\nSlice {current_slice+1}/{brain_mask_array.shape[0]}")
-        ax_img.set_title(f"First Timepoint of 4D Smoothed CTP\n(Scroll Through Slices)\nSlice {current_slice+1}/{brain_mask_array.shape[0]}")
-        ax_masked.set_title(f"First Timepoint of 4D Masked Smoothed CTP\n(Scroll Through Slices)\nSlice {current_slice+1}/{brain_mask_array.shape[0]}")
+        current_slice = max(0, min(new_slice, brain_mask.shape[0] - 1))
+        mask_display.set_data(brain_mask[current_slice])
+        volume_display.set_data(volume[current_slice])
+        masked_display.set_data(masked_volume_array[current_slice])
+        ax_mask.set_title(f"3D Brain Mask\n(Scroll Through Slices)\nSlice {current_slice+1}/{brain_mask.shape[0]}")
+        ax_volume.set_title(f"First Timepoint of 4D Smoothed CTP\n(Scroll Through Slices)\nSlice {current_slice+1}/{brain_mask.shape[0]}")
+        ax_masked.set_title(f"First Timepoint of 4D Masked Smoothed CTP\n(Scroll Through Slices)\nSlice {current_slice+1}/{brain_mask.shape[0]}")
         fig.canvas.draw_idle()
 
     def on_scroll(event):
-        if event.inaxes in [ax_mask, ax_img, ax_masked]:
+        if event.inaxes in [ax_mask, ax_volume, ax_masked]:
             if event.button == 'up':
                 update_slice(current_slice + 1)
             elif event.button == 'down':
@@ -141,13 +135,13 @@ def view_brain_mask(brain_mask, img):
             update_slice(current_slice - 1)
 
     # Display the first slice with consistent scaling across all slices
-    mask_display = ax_mask.imshow(brain_mask_array[current_slice], cmap=plt.cm.gray, vmin=mask_vmin, vmax=mask_vmax)
-    img_display = ax_img.imshow(img_array[current_slice], cmap=plt.cm.gray, vmin=img_vmin, vmax=img_vmax)
-    masked_display = ax_masked.imshow(masked_img_array[current_slice], cmap=plt.cm.gray, vmin=masked_vmin, vmax=masked_vmax)
+    mask_display = ax_mask.imshow(brain_mask[current_slice], cmap=plt.cm.gray, vmin=mask_vmin, vmax=mask_vmax)
+    volume_display = ax_volume.imshow(volume[current_slice], cmap=plt.cm.gray, vmin=volume_vmin, vmax=volume_vmax)
+    masked_display = ax_masked.imshow(masked_volume_array[current_slice], cmap=plt.cm.gray, vmin=masked_vmin, vmax=masked_vmax)
 
     # Remove axis labels
     ax_mask.set_axis_off()
-    ax_img.set_axis_off()
+    ax_volume.set_axis_off()
     ax_masked.set_axis_off()
 
     # Connect event handlers
@@ -197,19 +191,24 @@ def show_perfusion_map(volume, title):
 
 
 
-def view_aif_selection(img, time_index, img_ctc, s0_index, aif_propperties, aif_candidate_segmentations, brain_mask, window=(100, 1200)):
+def view_aif_selection(volume_list, time_index, img_ctc, s0_index, aif_propperties, aif_candidate_segmentations, brain_mask, window=(100, 1200)):
     """
     Visualize the region from which the AIF is extracted.
     Visualize the CTC images in this region.
     Visualize the contrast concentration curve in the AIF region and the fitted gamma variate function.
     """
 
+    # Convert from a list of 3d volumes to one 4d volumes
+    img_ctc = np.stack(img_ctc, axis=0)
+    volumes = np.stack(volume_list, axis=0)
+
     majority_slice = majority(np.where(aif_candidate_segmentations)[0])
-    majority_img = img[(img_ctc.shape[0] - s0_index)//2 + s0_index][:, :, int(majority_slice)]
-    majority_img = sitk.IntensityWindowing(majority_img, window[0]-window[1]/2, window[0]+window[1]/2, 0, 255)
-    majority_labels = sitk.GetImageFromArray(aif_candidate_segmentations[majority_slice].astype('uint8'))
-    majority_labels.CopyInformation(majority_img)
-    majority_img = sitk.GetArrayFromImage(sitk.LabelOverlay(majority_img, majority_labels))
+    majority_img = volumes[(img_ctc.shape[0] - s0_index)//2 + s0_index, int(majority_slice), :, :]
+    majority_img = np.clip((majority_img - (window[0] - window[1]/2)) / window[1] * 255, 0, 255)
+    majority_overlay = np.stack([majority_img] * 3, axis=-1)  # Convert to RGB
+    purple_mask = aif_candidate_segmentations[majority_slice] > 0
+    majority_overlay[purple_mask] = [128, 0, 128]  # Set purple color (RGB)
+    majority_img = majority_overlay.astype('uint8')
     
     # Create figure with 3 subplots
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
@@ -224,15 +223,14 @@ def view_aif_selection(img, time_index, img_ctc, s0_index, aif_propperties, aif_
     ctc_slice_data = img_ctc[:, int(majority_slice), :, :]  # Get the same slice as the overlay
     
     # Get brain mask for the same slice
-    brain_mask_array = sitk.GetArrayFromImage(brain_mask)
-    brain_maskSlice = brain_mask_array[int(majority_slice)]  # Extract the same slice from brain mask
+    brain_mask_slice = brain_mask[int(majority_slice)]  # Extract the same slice from brain mask
     
     # Pre-calculate global vmin and vmax for consistent scaling
     all_masked_values = []
     for t in range(ctc_slice_data.shape[0]):
         masked_image = ctc_slice_data[t].copy()
-        masked_image[brain_maskSlice == 0] = 0
-        all_masked_values.extend(masked_image[brain_maskSlice == 1].flatten())  # Only include brain voxels
+        masked_image[brain_mask_slice == 0] = 0
+        all_masked_values.extend(masked_image[brain_mask_slice == 1].flatten())  # Only include brain voxels
     
     # Set vmin and vmax based on the 2nd and 98th percentiles of all masked values
     ctc_vmin, ctc_vmax = np.percentile(all_masked_values, [2, 98])
@@ -243,7 +241,7 @@ def view_aif_selection(img, time_index, img_ctc, s0_index, aif_propperties, aif_
         
         # Apply brain mask to the CTC image
         ctc_image = ctc_slice_data[current_time_idx].copy()
-        ctc_image[brain_maskSlice == 0] = 0  # Set pixels outside brain mask to 0
+        ctc_image[brain_mask_slice == 0] = 0  # Set pixels outside brain mask to 0
         
         ctc_img.set_data(ctc_image)
         ax2.set_title(f'Contrast Signal in Slice With AIF Selection\n(Scroll Through Time)\nTimepoint {current_time_idx+1}/{ctc_slice_data.shape[0]}\nTime: {time_index[current_time_idx]:.1f}s')
@@ -270,7 +268,7 @@ def view_aif_selection(img, time_index, img_ctc, s0_index, aif_propperties, aif_
     
     # Initialize CTC display with brain mask applied and global scaling
     initial_ctc_image = ctc_slice_data[current_time_idx].copy()
-    initial_ctc_image[brain_maskSlice == 0] = 0  # Apply brain mask
+    initial_ctc_image[brain_mask_slice == 0] = 0  # Apply brain mask
     ctc_img = ax2.imshow(initial_ctc_image, cmap=plt.cm.gray, vmin=ctc_vmin, vmax=ctc_vmax)
     ax2.set_axis_off()
     

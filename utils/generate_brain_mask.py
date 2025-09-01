@@ -1,13 +1,18 @@
 import SimpleITK as sitk
+import os
 
-def generate_brain_mask(img):
+def generate_brain_mask(img, ctp_path):
     """
     Generate a brain mask from a given image using connected components and fast marching methods.
     """
 
-    # Use the first 3D volume to generate the mask for this 4D CTP image
-    img=img[0]
-
+    # Convert the input array to sitk image
+    img = sitk.GetImageFromArray(img)
+    # Identity matrix = RAS 
+    img.SetDirection((1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0))
+    
     # Smooth the input image using a Gaussian filter to reduce noise
     img= sitk.DiscreteGaussian(img)
 
@@ -43,5 +48,11 @@ def generate_brain_mask(img):
 
     # Create a binary mask by thresholding the fast marching result
     out = fm_img < 400
+    
+    brain_mask_path = os.path.join(os.path.dirname(ctp_path), 'brain_mask.nii.gz')
+    sitk.WriteImage(out, brain_mask_path)
 
-    return out
+    # Convert the output to a binary mask
+    out = sitk.GetArrayFromImage(out)
+
+    return out, brain_mask_path
