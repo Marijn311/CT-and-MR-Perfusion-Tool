@@ -3,7 +3,7 @@ from utils.generate_brain_mask import *
 from utils.generate_perfusion_maps import *
 from utils.post_processing import *
 from utils.viewers import *
-from utils.data_loading import *
+from utils.loading_and_preprocessing import *
 from utils.foss_vs_commercial import *
 from utils.aif import *
 import nibabel as nib
@@ -69,18 +69,6 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
         brain_mask, brain_mask_path = generate_brain_mask(volume_list[0], ctp_path)
     else:
         brain_mask = load_image(brain_mask_path)
-    
-    """
-    Currently, we use a single 3D brain mask to mask the entire 4D CTP scan.
-    However, if the patient moves during the scan, this mask may no longer allign with all 3D volumes.
-    This leads to skull being included in the mask. Skull has high attenuation similar to the contrast agent,
-    This may cause wrong aif selection and high CBF/CBV values at the edge of our perfusion maps.
-
-    TODO:
-    -One can either, exclude patients with motion from the dataset.
-    -Or one can implement a motion correction algorithm to realign the volumes.
-    -Or one could adapt the code to use 4D brain masks. This would require changes in many parts of the code though, increasing complexity and processing time.
-    """
 
     if DEBUG == True:
         view_brain_mask(brain_mask, volume_list)
@@ -107,10 +95,12 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
     # Step 5: Arterial input function (AIF) fitting
     # ---------------------------------------------------------------------------------
 
-    aif_propperties, aif_candidate_segmentations = determine_aif(ctc_img, time_index, brain_mask, ttp, roi=None)
+    aif_propperties, aif_candidate_segmentations, mean_fitting_error, aif_smoothness = determine_aif(ctc_img, time_index, brain_mask, ttp)
 
-    if DEBUG == True:
-        view_aif_selection(volume_list, time_index, ctc_img, s0_index, aif_propperties, aif_candidate_segmentations, brain_mask)
+    # if DEBUG == True:
+    #     view_aif_selection(volume_list, time_index, ctc_img, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error)
+    
+    view_aif_selection(volume_list, time_index, ctc_img, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness)
 
     # ---------------------------------------------------------------------------------
     # Step 6: Generate perfusion maps via deconvolution

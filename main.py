@@ -4,10 +4,10 @@ from utils.foss_vs_commercial import *
 
 print("\nStarting CTP processing...")
 
-DATASET_PATH = r"demo_data" # Path to the dataset directory containing CTP scansq
-SCAN_INTERVAL = 2.0         # Time between two 3D consecutive images in seconds
-DEBUG = True                # Opens interactive plots during processing to visualize intermediate results
-SHOW_COMPARISONS = True
+DATASET_PATH = r"demo_data" # Path to the dataset directory containing CTP scans (demo_data is isles24 data and demo_data_2 is unitobrain data)
+SCAN_INTERVAL = 2.0           # Time between two 3D consecutive images in seconds
+DEBUG = False                # Opens interactive plots during processing to visualize intermediate results
+SHOW_COMPARISONS = False
 
 # Store similarity metrics for every scan in the dataset that was compared to a reference map
 all_metrics = []

@@ -7,17 +7,59 @@ import pandas as pd
 
 
 
-def gv(t, t0, alpha, beta):
-    t = np.array(t) 
-    return np.maximum(0, t-t0)**alpha * np.exp(-t/beta) * (np.sign(t - t0) + 1) / 2
+def gv(t, t0, alpha, beta, amplitude=1.0):
+    """
+    Gamma variate function for modeling arterial input function.
+    
+    Parameters:
+        t: time array
+        t0: time delay/onset time
+        alpha: shape parameter 
+        beta: time constant
+        amplitude: peak amplitude scaling factor
+    """
+    t = np.array(t)
+    t_shifted = np.maximum(0, t - t0)
+    # Standard gamma variate: A * (t-t0)^alpha * exp(-(t-t0)/beta) for t > t0
+    result = np.zeros_like(t_shifted)
+    mask = t > t0
+    result[mask] = amplitude * (t_shifted[mask]**alpha) * np.exp(-t_shifted[mask]/beta)
+    return result
 
 def fit_gv(time_index, curve, sigma=None):
-    return curve_fit(gv, time_index, curve, bounds=([0, 0.1, 0.1], [20, 8, 8]), sigma=sigma)
+    # Updated bounds to include amplitude parameter
+    # bounds: [t0_min, alpha_min, beta_min, amplitude_min], [t0_max, alpha_max, beta_max, amplitude_max]
+    return curve_fit(gv, time_index, curve, bounds=([0, 0.1, 0.1, 0], [20, 8, 8, np.max(curve)*2]), sigma=sigma)
 
 def targetF(x_obs, y_obs):
-    def gv_target(t0, alpha, beta):
-        return (gv(x_obs, t0, alpha, beta) - y_obs) ** 2
+    def gv_target(t0, alpha, beta, amplitude=1.0):
+        return (gv(x_obs, t0, alpha, beta, amplitude) - y_obs) ** 2
     return gv_target
+
+def calculate_signal_smoothness(signal):
+    """
+    Calculate the smoothness of a signal using the sum of squared second derivatives.
+    Lower values indicate smoother signals that better resemble the gamma variate function.
+    
+    Parameters:
+        signal (numpy.ndarray): 1D signal array
+        
+    Returns:
+        float: Smoothness metric (lower values = smoother signal)
+    """
+    if len(signal) < 3:
+        return float('inf')  # Cannot calculate second derivative for very short signals
+    
+    # Calculate second derivative using finite differences
+    second_derivative = np.diff(signal, n=2)
+    
+    # Sum of squared second derivatives as smoothness metric
+    smoothness = np.sum(second_derivative ** 2)
+    
+    # Normalize by signal length to make comparable across different signal lengths
+    smoothness = smoothness / len(signal)
+    
+    return smoothness
 
 def majority(array, ignore=None):
     labels, counts = np.unique(array.ravel(), return_counts=True)
@@ -31,7 +73,7 @@ def majority(array, ignore=None):
 
 def determine_aif(ctc_img, time_index, brain_mask, ttp, 
             dilate_radius=5, erode_radius=2,
-            cand_vol_thres=2000, roi=None):
+            max_vol_thres=50, min_vol_thres=5, smoothness_threshold=30.0):
     """
     Identify the Arterial Input Function (AIF) from contrast-enhanced imaging data.
 
@@ -42,27 +84,32 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
         ttp (numpy.ndarray): Time-to-peak values for each voxel.
         dilate_radius (int, optional): Radius for dilation operation during morphological filtering. Defaults to 5.
         erode_radius (int, optional): Radius for erosion operation during morphological filtering. Defaults to 2.
-        cand_vol_thres (float, optional): Maximum volume threshold for AIF candidates in mm³. Defaults to 2000.
-        roi (tuple, optional): Region of interest (ROI) specified as (x_min, x_max, y_min, y_max, z_min, z_max).
+        max_vol_thres (float, optional): Maximum volume threshold for AIF candidates. Defaults to 50.
+        min_vol_thres (float, optional): Minimum volume threshold for AIF candidates. Defaults to 5.
+        smoothness_threshold (float, optional): Maximum allowed smoothness metric for AIF candidates. 
+                                               Candidates with higher values (less smooth) will be rejected. Defaults to 10.0.
 
     Returns:
         tuple:
             - aif_propperties (numpy.ndarray): Parameters of the best-fit gamma variate function for the AIF.
             - aif_candidate (numpy.ndarray): Binary mask of the selected AIF region.
+            - mean_error (float): Mean fitting error between the actual AIF signal and the fitted gamma variate function.
+            - smoothness (float): Smoothness metric of the selected AIF signal.
 
     Raises:
         ValueError: If no AIF candidates are found after all adaptive thresholding attempts.
 
     Notes:
         The function uses adaptive thresholding with progressively relaxed criteria to identify AIF candidates
-        based on AUC (Area Under Curve) and TTP (Time-to-Peak) percentiles. Morphological operations are
-        applied to refine candidates, and the best candidate is selected based on a score combining volume,
-        peak difference, and fitting error.
+        based on AUC (Area Under Curve), TTP (Time-to-Peak) percentiles, and signal smoothness. Morphological 
+        operations are applied to refine candidates, and the best candidate is selected based on a score 
+        combining volume, peak difference, and fitting error.
     """
 
     # Erode the brain mask with a flat kernel
-    # Due to the patient motion, skull can fall inside the mask at the edges. We want to prevent the skull from being seleted as AIF
-    kernel = np.ones((1, 10, 10), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
+    # Due to slight patient motion or sub-optimal masking, skull signal can be inside the mask near the mask's edges. 
+    # We want to prevent the skull from being selected as AIF
+    kernel = np.ones((1, 15, 15), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
     brain_mask = binary_erosion(brain_mask, kernel)
 
     # Convert the list of 3D volumes to a 4D array
@@ -74,30 +121,13 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
 
     # Adaptive thresholding approach
     # Set the TTP and AUC thresholds based on the TTP and AUC distributions
-    attempts = [
-        (np.percentile(ttp_values, 25), np.percentile(auc_values, 75)),
-        (np.percentile(ttp_values, 30), np.percentile(auc_values, 70)),
-        (np.percentile(ttp_values, 35), np.percentile(auc_values, 65)),
-        (np.percentile(ttp_values, 40), np.percentile(auc_values, 60)),
-        (np.percentile(ttp_values, 45), np.percentile(auc_values, 55)),
-        (np.percentile(ttp_values, 50), np.percentile(auc_values, 50)),
-        (np.percentile(ttp_values, 55), np.percentile(auc_values, 45)),
-        (np.percentile(ttp_values, 60), np.percentile(auc_values, 40)),
-        (np.percentile(ttp_values, 65), np.percentile(auc_values, 35)),
-        (np.percentile(ttp_values, 70), np.percentile(auc_values, 30)),
-        (np.percentile(ttp_values, 75), np.percentile(auc_values, 25)),
-    ]
+    attempts = [(np.percentile(ttp_values, 100-p), np.percentile(auc_values, p)) 
+                for p in range(95, 4, -10)]
 
     # Try to find an AIF with the thresholds for AUC and TTP. If it fails, try the next set of thresholds. Thresholds are progressively relaxed.
     for attempt_ttp, attempt_auc in attempts:
         # Identify initial AIF candidates based on AUC and TTP thresholds.
         aif_candidate = (ctc_img.sum(0) * brain_mask > attempt_auc) * (ttp < attempt_ttp) * (ttp > 0)
-
-        # If a region of interest (ROI) is provided, restrict AIF candidates to the ROI
-        if roi is not None:
-            aif_candidate_roi = np.zeros_like(aif_candidate)
-            aif_candidate_roi[roi[4]:roi[5], roi[0]:roi[1], roi[2]:roi[3]] = aif_candidate[roi[4]:roi[5], roi[0]:roi[1], roi[2]:roi[3]]
-            aif_candidate = aif_candidate_roi
 
         # Apply morphological operations (dilation followed by erosion) to refine AIF candidates
         aif_candidate = binary_erosion(
@@ -124,7 +154,14 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
             peak_difference = np.max(curve_mean) - np.mean(curve_mean[-3:])  # Difference between peak and end values of the curve
 
             # Skip candidates with volume exceeding the threshold
-            if vol > cand_vol_thres:
+            if vol > max_vol_thres or vol < min_vol_thres:
+                continue
+
+            # Calculate signal smoothness
+            smoothness = calculate_signal_smoothness(curve_mean)
+            
+            # Skip candidates that are not smooth enough (exceed smoothness threshold)
+            if smoothness > smoothness_threshold:
                 continue
 
             try:
@@ -145,7 +182,8 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
                 'popts': popts,
                 'mean_error': err.mean(),
                 'max_error': err.max(),
-                'peak_difference': peak_difference
+                'peak_difference': peak_difference,
+                'smoothness': smoothness
             })
 
         # Convert the list of candidate properties to a DataFrame
@@ -160,11 +198,14 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
             bestCand = np.argmax(cands.score)
             aifSegIdx = cands.iloc[bestCand].idx  # Index of the selected AIF region
             aif_propperties = cands.iloc[bestCand].popts  # Parameters of the best-fit gamma variate function
+            selected_smoothness = cands.iloc[bestCand].smoothness  # Smoothness of the selected candidate
             cands.loc[:, 'chosen'] = 0
             cands.loc[bestCand, 'chosen'] = 1  # Mark the selected candidate
 
-            # Return the AIF properties, binary mask of the selected region
-            return aif_propperties, aif_candidate == aifSegIdx
+            
+
+            # Return the AIF properties, binary mask of the selected region, mean error, and smoothness
+            return aif_propperties, aif_candidate == aifSegIdx, cands.iloc[bestCand].mean_error, selected_smoothness
     
     # If no candidates found after all attempts
     raise ValueError("No AIF candidates found after adaptive thresholding attempts.")

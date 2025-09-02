@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
+from matplotlib.widgets import Slider
 from utils.aif import gv
 
 
@@ -191,7 +192,7 @@ def show_perfusion_map(volume, title):
 
 
 
-def view_aif_selection(volume_list, time_index, img_ctc, s0_index, aif_propperties, aif_candidate_segmentations, brain_mask, window=(100, 1200)):
+def view_aif_selection(volume_list, time_index, img_ctc, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness):
     """
     Visualize the region from which the AIF is extracted.
     Visualize the CTC images in this region.
@@ -203,48 +204,61 @@ def view_aif_selection(volume_list, time_index, img_ctc, s0_index, aif_propperti
     volumes = np.stack(volume_list, axis=0)
 
     majority_slice = majority(np.where(aif_candidate_segmentations)[0])
-    majority_img = volumes[(img_ctc.shape[0] - s0_index)//2 + s0_index, int(majority_slice), :, :]
-    majority_img = np.clip((majority_img - (window[0] - window[1]/2)) / window[1] * 255, 0, 255)
-    majority_overlay = np.stack([majority_img] * 3, axis=-1)  # Convert to RGB
-    purple_mask = aif_candidate_segmentations[majority_slice] > 0
-    majority_overlay[purple_mask] = [128, 0, 128]  # Set purple color (RGB)
-    majority_img = majority_overlay.astype('uint8')
     
-    # Create figure with 3 subplots
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+    # Create figure with 3 subplots and space for slider
+    fig = plt.figure(figsize=(18, 7))
+    ax1 = plt.subplot(1, 3, 1)
+    ax2 = plt.subplot(1, 3, 2)
+    ax3 = plt.subplot(1, 3, 3)
     
-    # First subplot: AIF Candidate Segmentation Overlay
-    ax1.imshow(majority_img.astype('uint8'))
-    ax1.set_title('Slice With AIF Candidate Segmentation\nIn purple: Region From Which AIF is Extracted')
-    ax1.set_axis_off()
-    
-    # Second subplot: Scrollable CTC image
+    # Initialize current indices
     current_time_idx = 0
-    ctc_slice_data = img_ctc[:, int(majority_slice), :, :]  # Get the same slice as the overlay
+    current_slice_idx = int(majority_slice)
     
-    # Get brain mask for the same slice
-    brain_mask_slice = brain_mask[int(majority_slice)]  # Extract the same slice from brain mask
-    
-    # Pre-calculate global vmin and vmax for consistent scaling
+    # Pre-calculate global vmin and vmax for consistent scaling across all slices
     all_masked_values = []
-    for t in range(ctc_slice_data.shape[0]):
-        masked_image = ctc_slice_data[t].copy()
-        masked_image[brain_mask_slice == 0] = 0
-        all_masked_values.extend(masked_image[brain_mask_slice == 1].flatten())  # Only include brain voxels
+    for s in range(img_ctc.shape[1]):  # Loop through slices
+        brain_mask_slice = brain_mask[s]
+        for t in range(img_ctc.shape[0]):  # Loop through time
+            masked_image = img_ctc[t, s, :, :].copy()
+            masked_image[brain_mask_slice == 0] = 0
+            if np.any(brain_mask_slice == 1):  # Only if there are brain voxels in this slice
+                all_masked_values.extend(masked_image[brain_mask_slice == 1].flatten())
     
     # Set vmin and vmax based on the 2nd and 98th percentiles of all masked values
     ctc_vmin, ctc_vmax = np.percentile(all_masked_values, [2, 98])
     
-    def update_ctc_display(time_idx):
-        nonlocal current_time_idx
-        current_time_idx = max(0, min(time_idx, ctc_slice_data.shape[0] - 1))
+    def update_ctc_display(time_idx=None, slice_idx=None):
+        nonlocal current_time_idx, current_slice_idx
         
-        # Apply brain mask to the CTC image
+        if time_idx is not None:
+            current_time_idx = max(0, min(time_idx, img_ctc.shape[0] - 1))
+        if slice_idx is not None:
+            current_slice_idx = max(0, min(slice_idx, img_ctc.shape[1] - 1))
+        
+        # Get the current slice data
+        ctc_slice_data = img_ctc[:, current_slice_idx, :, :]
+        brain_mask_slice = brain_mask[current_slice_idx]
+        
+        # Apply brain mask to the CTC image for both subplots
         ctc_image = ctc_slice_data[current_time_idx].copy()
         ctc_image[brain_mask_slice == 0] = 0  # Set pixels outside brain mask to 0
         
+        # Update left subplot (CTC with AIF overlay)
+        # Create RGB version for overlay
+        ctc_image_rgb = np.stack([ctc_image] * 3, axis=-1)
+        # Normalize to 0-255 range for RGB display
+        ctc_image_rgb = ((ctc_image_rgb - ctc_vmin) / (ctc_vmax - ctc_vmin) * 255).clip(0, 255)
+        # Apply red color to AIF candidate voxels
+        aif_mask_slice = aif_candidate_segmentations[current_slice_idx] > 0
+        ctc_image_rgb[aif_mask_slice] = [255, 0, 0]  # Set red color (RGB)
+        
+        ctc_img_overlay.set_data(ctc_image_rgb.astype('uint8'))
+        ax1.set_title(f'CTC With AIF Candidate Segmentation\n(Red: AIF Region)\nSlice {current_slice_idx+1}/{img_ctc.shape[1]}, Timepoint {current_time_idx+1}/{img_ctc.shape[0]}\nTime: {time_index[current_time_idx]:.1f}s')
+        
+        # Update middle subplot (regular CTC)
         ctc_img.set_data(ctc_image)
-        ax2.set_title(f'Contrast Signal in Slice With AIF Selection\n(Scroll Through Time)\nTimepoint {current_time_idx+1}/{ctc_slice_data.shape[0]}\nTime: {time_index[current_time_idx]:.1f}s')
+        ax2.set_title(f'Contrast Signal in Different Slices\n(Scroll Through Time with Mouse, Slices with Slider)\nSlice {current_slice_idx+1}/{img_ctc.shape[1]}, Timepoint {current_time_idx+1}/{img_ctc.shape[0]}\nTime: {time_index[current_time_idx]:.1f}s')
 
         # Update the vertical line on the signal plot to show current time
         if hasattr(update_ctc_display, 'time_line'):
@@ -254,30 +268,57 @@ def view_aif_selection(volume_list, time_index, img_ctc, s0_index, aif_propperti
         fig.canvas.draw_idle()
     
     def on_scroll(event):
-        if event.inaxes == ax2:
+        if event.inaxes in [ax1, ax2]:  # Allow scrolling on both left and middle subplots
             if event.button == 'up':
-                update_ctc_display(current_time_idx + 1)
+                update_ctc_display(time_idx=current_time_idx + 1)
             elif event.button == 'down':
-                update_ctc_display(current_time_idx - 1)
+                update_ctc_display(time_idx=current_time_idx - 1)
     
     def on_key(event):
         if event.key == 'up' or event.key == 'right':
-            update_ctc_display(current_time_idx + 1)
+            update_ctc_display(time_idx=current_time_idx + 1)
         elif event.key == 'down' or event.key == 'left':
-            update_ctc_display(current_time_idx - 1)
+            update_ctc_display(time_idx=current_time_idx - 1)
     
-    # Initialize CTC display with brain mask applied and global scaling
-    initial_ctc_image = ctc_slice_data[current_time_idx].copy()
-    initial_ctc_image[brain_mask_slice == 0] = 0  # Apply brain mask
+    # Initialize both CTC displays
+    initial_ctc_slice_data = img_ctc[:, current_slice_idx, :, :]
+    initial_brain_mask_slice = brain_mask[current_slice_idx]
+    initial_ctc_image = initial_ctc_slice_data[current_time_idx].copy()
+    initial_ctc_image[initial_brain_mask_slice == 0] = 0  # Apply brain mask
+    
+    # Left subplot: CTC with AIF overlay
+    initial_ctc_image_rgb = np.stack([initial_ctc_image] * 3, axis=-1)
+    initial_ctc_image_rgb = ((initial_ctc_image_rgb - ctc_vmin) / (ctc_vmax - ctc_vmin) * 255).clip(0, 255)
+    initial_aif_mask_slice = aif_candidate_segmentations[current_slice_idx] > 0
+    initial_ctc_image_rgb[initial_aif_mask_slice] = [255, 0, 0]  # Set red color
+    ctc_img_overlay = ax1.imshow(initial_ctc_image_rgb.astype('uint8'))
+    ax1.set_axis_off()
+    
+    # Middle subplot: Regular CTC
     ctc_img = ax2.imshow(initial_ctc_image, cmap=plt.cm.gray, vmin=ctc_vmin, vmax=ctc_vmax)
     ax2.set_axis_off()
     
+    # Create slider for slice navigation
+    slider_ax = plt.axes([0.375, 0.02, 0.25, 0.03])  # Position: [left, bottom, width, height]
+    slice_slider = Slider(slider_ax, 'Slice', 0, img_ctc.shape[1]-1, valinit=current_slice_idx, valfmt='%d')
+    
+    def on_slice_change(val):
+        slice_idx = int(slice_slider.val)
+        update_ctc_display(slice_idx=slice_idx)
+    
+    slice_slider.on_changed(on_slice_change)
+    
     # Third subplot: Signal plot
-    ax3.plot(time_index, img_ctc[:, aif_candidate_segmentations].mean(axis=1), label='Mean AIF Candidate Signal')
-    ax3.plot(np.linspace(0, max(time_index)*1.5, 1000), gv(np.linspace(0, max(time_index)*1.5, 1000), *aif_propperties), label='Fitted Gamma Variate')
+    # Calculate mean AIF signal
+    mean_aif_signal = img_ctc[:, aif_candidate_segmentations].mean(axis=1)
+    
+    ax3.plot(time_index, mean_aif_signal, label='Mean AIF Candidate Signal', linewidth=2)
+    # Plot fitted gamma variate using the same time points as the signal for proper comparison
+    fitted_signal = gv(time_index, *aif_propperties)
+    ax3.plot(time_index, fitted_signal, label='Fitted Gamma Variate', linewidth=2)
     ax3.set_xlabel('Time (s)')
     ax3.set_ylabel('Signal Intensity')
-    ax3.set_title('AIF Diagnostic: Signal vs Fitted Model')
+    ax3.set_title(f'AIF Diagnostic: Signal vs Fitted Model\nMean Fitting Error: {mean_fitting_error:.2f}, Smoothness: {aif_smoothness:.2f}')
     ax3.legend()
     ax3.grid(True, alpha=0.3)
     
@@ -286,9 +327,10 @@ def view_aif_selection(volume_list, time_index, img_ctc, s0_index, aif_propperti
     fig.canvas.mpl_connect('key_press_event', on_key)
     
     # Initialize the display
-    update_ctc_display(0)
+    update_ctc_display()
     
     plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)  # Make room for the slider
     plt.show()
 
 

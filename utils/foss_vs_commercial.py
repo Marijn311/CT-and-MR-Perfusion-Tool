@@ -5,7 +5,7 @@ import os
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from skimage.metrics import structural_similarity as ssim
 from utils.viewers import show_comparison_maps
-from utils.data_loading import load_image
+from utils.loading_and_preprocessing import load_image
 from scipy.ndimage import binary_erosion
 
 def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_path, gen_tmax_path, com_cbf_path, com_cbv_path, com_mtt_path, com_ttp_path, com_tmax_path, brain_mask_path, plot):
