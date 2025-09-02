@@ -1,10 +1,11 @@
 from scipy.linalg import toeplitz
 import numpy as np
 from utils.aif import gv
+from utils.viewers import view_4d_img
 
-def extract_ctc(volume_list, brain_mask, hu_threshold=150, ratio_threshold=0.05):
+def extract_ctc(volume_list, brain_mask, intensity_threshold=None, ratio_threshold=None, image_type=None):
     """
-    Extracts the Contrast Time Curve (CTC) from a sequence of CTP images.
+    Extracts the Contrast Time Curve (CTC) from a sequence of CTP/MRP images.
 
     This function processes a list of raw CTP images and a brain mask to compute the 
     contrast agent signal over time. It identifies the starting index of significant 
@@ -14,7 +15,7 @@ def extract_ctc(volume_list, brain_mask, hu_threshold=150, ratio_threshold=0.05)
     Parameters:
         volume_list (list of SimpleITK.Image): A list of raw CTP images representing a time series.
         brain_mask (SimpleITK.Image): A binary mask indicating the brain region in the images.
-        hu_threshold (int, optional): The Hounsfield Unit (HU) threshold to identify contrast agent presence. 
+        intensity_threshold (int, optional): The Hounsfield Unit (HU) threshold to identify contrast agent presence. 
                                     Defaults to 150.
         ratio_threshold (float, optional): The threshold for the ratio of contrast agent signal change 
                                         to determine the starting index. Defaults to 0.05.
@@ -26,27 +27,52 @@ def extract_ctc(volume_list, brain_mask, hu_threshold=150, ratio_threshold=0.05)
             - s0_index (int): The starting index of significant contrast agent presence.
     """
 
+    if image_type == 'ctp':
+        intensity_threshold=150
+        ratio_threshold=0.05
+    if image_type == 'mrp': 
+        intensity_threshold=1600
+        ratio_threshold=0.1
+
+        # For the visualization we want the contrast to be high values and the background to be low
+        # Invert the image using global min and max across all volumes
+        global_max = max(np.max(vol) for vol in volume_list)
+        global_min = min(np.min(vol) for vol in volume_list)
+        volume_list = [global_max + global_min - i for i in volume_list]
+
+    # view_4d_img(volume_list, title="Inverted MRP", image_type=image_type)
+    
     # For each timepoint, store the amount of contrast agent that is present in the volume
     total_contrast_value = []
     
     # Iterate through each time point in the image series
     nr_timepoints = len(volume_list)
+    contrast_masks = []  # Store contrast masks for each timepoint
+    
     for t in range(nr_timepoints):
         
         # Get the current volume at time point t
         current_volume = volume_list[t]
 
         # Extract the pixels which we deem to be part of the contrast signal. 
-        # To be part of the contrast signal, pixels must be above the HU threshold and within the brain mask.
-        contrast_mask = (current_volume > hu_threshold) & brain_mask
+        # To be part of the contrast signal, pixels must be above the (HU) threshold and within the brain mask.
+        contrast_mask = (current_volume > intensity_threshold) & brain_mask
         contrast_pixels = current_volume[contrast_mask.astype('bool')]
-        
+
         # Sum all contrast pixel values for this time point
         volume_contrast_sum = contrast_pixels.sum()
         
         # Add this volume's contrast sum to the list
         total_contrast_value.append(volume_contrast_sum)
+        
+        # Store the contrast mask for this timepoint
+        contrast_masks.append(contrast_mask)
 
+    # Stack all contrast masks into a 4D array
+    contrast_masks_4d = np.stack(contrast_masks, axis=0)
+    
+    # view_4d_img(contrast_masks_4d, title="4D Contrast Mask", image_type=image_type) 
+    
     # Normalize the total contrast agent value by the first volume, to remove the baseline
     total_contrast_value = (total_contrast_value - total_contrast_value[0]) / total_contrast_value[0]
     
@@ -64,7 +90,7 @@ def extract_ctc(volume_list, brain_mask, hu_threshold=150, ratio_threshold=0.05)
     # Remove the baseline signal S0 from the images
     # This leaves us with the contrast agent signal only
     volumes = volumes - s0[np.newaxis, :, :, :]
-    volumes[volumes < 0] = 0
+    # volumes[volumes < 0] = 0
     
     # Apply the brain mask
     volumes = volumes * brain_mask[np.newaxis, :, :, :]
@@ -72,7 +98,9 @@ def extract_ctc(volume_list, brain_mask, hu_threshold=150, ratio_threshold=0.05)
     # Unstack back into a list of 3d arrays
     volume_list = [volumes[i] for i in range(volumes.shape[0])]
 
-    return volume_list, s0_index
+
+
+    return volume_list, s0_index, total_contrast_value
 
 def generate_ttp(ctc_img, time_index, s0_index, brain_mask, outside_value=-1):
     """

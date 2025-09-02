@@ -10,7 +10,7 @@ import nibabel as nib
 import numpy as np
 import os 
 
-def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
+def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, brain_mask_path=None):
     """
     Process Computed Tomography Perfusion (CTP) scans to generate perfusion maps.
     This function performs a complete CTP analysis pipeline including image preprocessing,
@@ -52,35 +52,41 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
     time_index = [i * SCAN_INTERVAL for i in time_index]
 
     if DEBUG == True:
-        view_4d_img(volume_list, title="Input CTP")
-    
+        view_4d_img(volume_list, title=f"Input {IMAGE_TYPE.upper()}", image_type=IMAGE_TYPE)
+
     # ---------------------------------------------------------------------------------
     # Step 2: Image preprocessing (smoothing and masking)
     # ---------------------------------------------------------------------------------
 
     # Smooth the input image while keeping edges intact.
-    volume_list = [denoise_tv_chambolle(i, weight=0.2) for i in volume_list]
+    # volume_list = [denoise_tv_chambolle(i, weight=0.2) for i in volume_list]
 
-    if DEBUG == True:
-        view_4d_img(volume_list, title="Smoothed CTP")
+    # if DEBUG == True:
+    #     view_4d_img(volume_list, title=f"Smoothed {IMAGE_TYPE.upper()}", image_type=IMAGE_TYPE)
 
     # Either load a pre-existing brain mask or generate a one automatically
     if brain_mask_path is None:
-        brain_mask, brain_mask_path = generate_brain_mask(volume_list[0], ctp_path)
+        if IMAGE_TYPE == 'ctp':
+            brain_mask, brain_mask_path = generate_brain_mask_ctp(volume_list[0], ctp_path)
+        if IMAGE_TYPE == 'mrp':
+            brain_mask, brain_mask_path = generate_brain_mask_mrp(volume_list[0], ctp_path)
     else:
         brain_mask = load_image(brain_mask_path)
 
-    if DEBUG == True:
-        view_brain_mask(brain_mask, volume_list)
+    # if DEBUG == True:
+    #     view_brain_mask(brain_mask, volume_list)
 
     # ---------------------------------------------------------------------------------
     # Step 3: Concentration Time Curve (CTC) Generation
     # ---------------------------------------------------------------------------------
     
-    ctc_img, s0_index = extract_ctc(volume_list, brain_mask) 
+    ctc_img, s0_index, total_contrast_value = extract_ctc(volume_list, brain_mask, image_type=IMAGE_TYPE) 
 
     if DEBUG == True:
-            view_4d_img(ctc_img, title="Contrast Signal (Smoothed CTP Minus S0)")
+        shows_contrast_curve(total_contrast_value, s0_index)
+
+    if DEBUG == True:
+            view_4d_img(ctc_img, title="Contrast Signal (Smoothed CTP Minus S0)", image_type=IMAGE_TYPE)
 
     # ---------------------------------------------------------------------------------
     # Step 4: TTP (time-to-peak) map generation
@@ -97,11 +103,9 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path=None):
 
     aif_propperties, aif_candidate_segmentations, mean_fitting_error, aif_smoothness = determine_aif(ctc_img, time_index, brain_mask, ttp)
 
-    # if DEBUG == True:
-    #     view_aif_selection(volume_list, time_index, ctc_img, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error)
+    if DEBUG == True:
+        view_aif_selection(time_index, ctc_img, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness)
     
-    view_aif_selection(volume_list, time_index, ctc_img, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness)
-
     # ---------------------------------------------------------------------------------
     # Step 6: Generate perfusion maps via deconvolution
     # ---------------------------------------------------------------------------------

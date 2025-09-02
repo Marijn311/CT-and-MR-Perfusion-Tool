@@ -5,14 +5,14 @@ from matplotlib.widgets import Slider
 from utils.aif import gv
 
 
-def view_4d_img(img_list, title, window=(200, 500)):
+def view_4d_img(img_list, title, image_type=None, vmin=0, vmax=100):
     """Visualize a 4D volume in img_list as a 2D slice taken from the middle of the 3D volume.
     You can scroll through the time in this middle slice. 
-    Besides the middle slice we show the maximum intensity projection (MIP) of the middle third slices of the volume."""
+    Besides the middle slice we show the maximum intensity projection (MIP) of the middle third slices of the volume for 'ctp' images,
+    or minimum intensity projection (MinIP) for 'mrp' images."""
 
     current_idx = 0
     
-    # Pre-calculate vmin and vmax for all volumes to ensure consistent scaling
     all_mip_values = []
     all_original_values = []
     processed_mip_volumes = []
@@ -20,27 +20,32 @@ def view_4d_img(img_list, title, window=(200, 500)):
     
     for img in img_list:
         
-        # Maximum intensity projection from the middle third of the volume
+        # Maximum or minimum intensity projection from the middle third of the volume
         img_array = np.array(img)
         depth = img_array.shape[0]
         middle_third = img_array[depth//3:depth*2//3, :, :]
-        mip = np.max(middle_third, axis=0)
         
-        # Apply intensity windowing to MIP
-        mip_windowed = np.clip((mip - (window[0] - window[1]/2)) / window[1] * 255, 0, 255)
-        middle_slice_mip = mip_windowed.astype('uint8')
-       
+        # Use minimum intensity projection for 'mrp', maximum for 'ctp' or default
+        if image_type == 'mrp':
+            middle_slice_projection = np.min(middle_third, axis=0)
+        else:
+            middle_slice_projection = np.max(middle_third, axis=0)
+
+
         # Original image - take middle slice
         middle_slice_idx = img_array.shape[0] // 2
         middle_slice_original = img[middle_slice_idx, :, :,]
 
-        processed_mip_volumes.append(middle_slice_mip)
+        processed_mip_volumes.append(middle_slice_projection)
         processed_original_volumes.append(middle_slice_original)
-        all_mip_values.extend(middle_slice_mip.flatten())
+        all_mip_values.extend(middle_slice_projection.flatten())
         all_original_values.extend(middle_slice_original.flatten())
-    
-    mip_vmin, mip_vmax = np.percentile(all_mip_values, [2, 98])
-    original_vmin, original_vmax = np.percentile(all_original_values, [2, 98])
+
+
+    mip_vmin, mip_vmax = np.percentile(all_mip_values, [vmin, vmax])
+    original_vmin, original_vmax = np.percentile(all_original_values, [vmin, vmax])
+
+
 
     def update_volume(new_idx):
         nonlocal current_idx
@@ -50,9 +55,10 @@ def view_4d_img(img_list, title, window=(200, 500)):
         img_original.set_data(processed_original_volumes[current_idx])
         ax_original.set_title(f"Middle Slice of 4D Volume\n(Scroll Through Time)\nTimepoint {current_idx+1}/{len(img_list)}")
 
-        # Update MIP image
+        # Update MIP/MinIP image
         img_mip.set_data(processed_mip_volumes[current_idx])
-        ax_mip.set_title(f"Maximum Intensity Projection of Middle Third of Slices\n(Scroll Through Time)\nTimepoint {current_idx+1}/{len(img_list)}")
+        projection_type = "Minimum Intensity Projection" if image_type == 'mrp' else "Maximum Intensity Projection"
+        ax_mip.set_title(f"{projection_type} of Middle Third of Slices\n(Scroll Through Time)\nTimepoint {current_idx+1}/{len(img_list)}")
 
         fig.suptitle(f"{title}", fontsize=14)
         fig.canvas.draw_idle()
@@ -192,7 +198,7 @@ def show_perfusion_map(volume, title):
 
 
 
-def view_aif_selection(volume_list, time_index, img_ctc, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness):
+def view_aif_selection(time_index, img_ctc, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness):
     """
     Visualize the region from which the AIF is extracted.
     Visualize the CTC images in this region.
@@ -201,7 +207,6 @@ def view_aif_selection(volume_list, time_index, img_ctc, aif_propperties, aif_ca
 
     # Convert from a list of 3d volumes to one 4d volumes
     img_ctc = np.stack(img_ctc, axis=0)
-    volumes = np.stack(volume_list, axis=0)
 
     majority_slice = majority(np.where(aif_candidate_segmentations)[0])
     
@@ -426,6 +431,48 @@ def show_comparison_maps(generated, commercial, title, mask, apply_mask):
     
     fig.canvas.mpl_connect('scroll_event', on_scroll)
     fig.canvas.mpl_connect('key_press_event', on_key)
+    
+    plt.tight_layout()
+    plt.show()
+
+
+def shows_contrast_curve(total_contrast_value, s0_index):
+    """
+    Display a line graph of total contrast values over time with highlighted s0_index.
+    
+    Parameters
+    ----------
+    total_contrast_value : list
+        List containing the normalized sum of contrast for every timepoint.
+    s0_index : int
+        Index of the baseline timepoint (s0) to be highlighted.
+    """
+    
+    # Create timepoint indices for x-axis
+    timepoints = list(range(len(total_contrast_value)))
+    
+    # Create the figure and axis
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot the contrast curve
+    ax.plot(timepoints, total_contrast_value, 'b-', linewidth=2, label='Total Contrast Signal')
+    
+    # Highlight the s0_index point
+    if 0 <= s0_index < len(total_contrast_value):
+        ax.plot(s0_index, total_contrast_value[s0_index], 'ro', markersize=8, 
+                label=f'S0 Index (Baseline): {s0_index}')
+        # Add a vertical line at s0_index for better visibility
+        ax.axvline(s0_index, color='red', linestyle='--', alpha=0.7)
+    
+    # Set labels and title
+    ax.set_xlabel('Timepoint Index')
+    ax.set_ylabel('Total Contrast Value (Normalized)')
+    ax.set_title('Total Contrast Signal Over Time')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # Add some padding to the plot
+    ax.margins(x=0.02, y=0.1)
     
     plt.tight_layout()
     plt.show()

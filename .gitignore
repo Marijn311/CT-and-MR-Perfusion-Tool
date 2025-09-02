@@ -2,6 +2,6 @@ __pycache__
 *.pyc
 *.h5
 unitobrain.py
-/demo_data
-/demo_data_2
+/demo_data*
+
 

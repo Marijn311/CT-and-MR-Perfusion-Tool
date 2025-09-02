@@ -18,7 +18,7 @@ def load_image(path):
         # First downsample the image if needed, this will speed up computation.
         volumes = resize_images(image_array)  
 
-        volumes = motion_correction(volumes)
+        # volumes = motion_correction(volumes)
 
         img_list = []
         time_index = []

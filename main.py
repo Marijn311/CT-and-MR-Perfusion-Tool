@@ -4,10 +4,11 @@ from utils.foss_vs_commercial import *
 
 print("\nStarting CTP processing...")
 
-DATASET_PATH = r"demo_data" # Path to the dataset directory containing CTP scans (demo_data is isles24 data and demo_data_2 is unitobrain data)
+DATASET_PATH = r"demo_data_unitobrain" # Path to the dataset directory containing CTP scans
 SCAN_INTERVAL = 2.0           # Time between two 3D consecutive images in seconds
-DEBUG = False                # Opens interactive plots during processing to visualize intermediate results
-SHOW_COMPARISONS = False
+IMAGE_TYPE = 'ctp'          # Either mrp or ctp
+DEBUG = True                # Opens interactive plots during processing to visualize intermediate results
+SHOW_COMPARISONS = True
 
 # Store similarity metrics for every scan in the dataset that was compared to a reference map
 all_metrics = []
@@ -42,7 +43,7 @@ for root, dirs, files in os.walk(DATASET_PATH):
         gen_tmax_path = os.path.join(com_perfusion_path, "foss_TMAX.nii.gz")
 
         # Generate perfusion maps from input CTP 
-        brain_mask_path = process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, brain_mask_path)
+        brain_mask_path = process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, brain_mask_path)
 
         # Compare the generated perfusion maps with reference maps
         metrics = compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_path, gen_tmax_path, com_cbf_path, com_cbv_path, com_mtt_path, com_ttp_path, com_tmax_path, brain_mask_path, plot=SHOW_COMPARISONS)
