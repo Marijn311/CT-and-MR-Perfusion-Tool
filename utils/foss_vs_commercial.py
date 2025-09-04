@@ -1,12 +1,13 @@
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from skimage.metrics import structural_similarity as ssim
+from utils.loading_and_preprocessing import *
+from utils.post_processing import *
+from utils.viewers import *
+import os
 import numpy as np
 import scipy.stats
 import pandas as pd
-import os
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from skimage.metrics import structural_similarity as ssim
-from utils.viewers import show_comparison_maps
-from utils.loading_and_preprocessing import load_image
-from scipy.ndimage import binary_erosion
+
 
 def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_path, gen_tmax_path, com_cbf_path, com_cbv_path, com_mtt_path, com_ttp_path, com_tmax_path, brain_mask_path, plot):
     """
@@ -34,7 +35,6 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
         dict: Dictionary containing similarity metrics (NCC, SSIM, MAE, MSE, RMSE) 
               for each perfusion map type (cbf, cbv, mtt, tmax).
     """
-
 
     # Load the generated images
     cbf = load_image(gen_cbf_path)
@@ -72,14 +72,8 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
     # This was also done to the generated maps.
     # This helps the image to look more similar visually if we dont want to tune the parameters that determine the absolute values.
     for map_type, img in commercial_data.items():
-       
-        # Erode the brain mask with a flat kernel
-        # Due to the patient motion, skull can fall inside the mask at the edges.
-        # to get a more stable result we shrink the mask a bit before extracting the mean.
-        kernel = np.ones((1, 10, 10), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
-        brain_mask = binary_erosion(brain_mask, kernel)
-        mean_val = img[brain_mask == 1].mean()
-        commercial_data[map_type] = (img - mean_val) / mean_val
+        # Apply the same post-processing to the commercial maps
+        commercial_data[map_type] = post_process_perfusion_map(img, brain_mask, map_type)
 
     # Define perfusion maps for comparison
     generated_maps = {
@@ -105,7 +99,7 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
         print("-" * 30)
         
         # Calculate similarity metrics
-        metrics = calculate_similarity_metrics(generated, commercial, brain_mask, apply_mask=True)
+        metrics = calculate_similarity_metrics(generated, commercial, brain_mask, apply_mask=False)
         all_metrics[map_name] = metrics
         
         # Display metrics
@@ -163,7 +157,7 @@ def calculate_similarity_metrics(generated, commercial, mask, apply_mask):
     generated_masked = np.where(generated == mode_generated, np.nan, generated)
 
     # The commercial and generated maps have different brain masks.
-    # We only use the pixels which are not nan in both images.
+    # We only use the pixels which are not nan nor inf in both images.
     if apply_mask==True:
         mask = np.where(np.isfinite(commercial_masked) & np.isfinite(generated_masked), 1, 0)
         generated_masked = np.where(mask > 0, generated, np.nan)
@@ -173,7 +167,7 @@ def calculate_similarity_metrics(generated, commercial, mask, apply_mask):
     gen_flat = generated_masked.flatten()
     com_flat = commercial_masked.flatten()
 
-    # Create mask for valid values (only keep pixels where both arrays are not NaN and not inf)
+    # remove the NaN and inf values that may still be present in the flat arrays.
     valid_mask = np.isfinite(gen_flat) & np.isfinite(com_flat)
     gen_valid = gen_flat[valid_mask]
     com_valid = com_flat[valid_mask]

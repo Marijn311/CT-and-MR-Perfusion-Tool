@@ -16,11 +16,12 @@ def post_process_perfusion_map(generated_volume, brain_mask, img_name):
 
     # Erode the brain mask with a flat kernel
     # Due to the patient motion, skull can fall inside the mask at the edges.
-    # to get a more stable result we shrink the mask a bit before extracting the mean.
-    kernel = np.ones((1, 10, 10), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
+    # to get a more stable result we shrink the mask a bit before extracting the mean.  
+    
+    kernel = np.ones((1, 15, 15), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
     brain_mask = binary_erosion(brain_mask, kernel)
-
-    gen_mean = generated_volume[brain_mask == 1].mean()
+    gen = generated_volume[brain_mask == 1]
+    gen_mean = np.mean(gen)
     generated_volume = (generated_volume - gen_mean) / gen_mean
 
     return generated_volume

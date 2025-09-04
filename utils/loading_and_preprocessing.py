@@ -1,6 +1,6 @@
-import SimpleITK as sitk
-import numpy as np
 import ants
+import numpy as np
+import SimpleITK as sitk
 
 def load_image(path):
     """ Reads a NIfTI file, reshape the volume(s) if required, and returns a list of 3D volumes plus their time indices for a 4d input.

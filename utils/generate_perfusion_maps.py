@@ -1,9 +1,9 @@
-from scipy.linalg import toeplitz
 import numpy as np
 from utils.aif import gv
-from utils.viewers import view_4d_img
+from scipy.linalg import toeplitz
 
-def extract_ctc(volume_list, brain_mask, intensity_threshold=None, ratio_threshold=None, image_type=None):
+
+def extract_ctc(volume_list, brain_mask, echo_time, bolus_threshold=None, image_type=None):
     """
     Extracts the Contrast Time Curve (CTC) from a sequence of CTP/MRP images.
 
@@ -17,7 +17,7 @@ def extract_ctc(volume_list, brain_mask, intensity_threshold=None, ratio_thresho
         brain_mask (SimpleITK.Image): A binary mask indicating the brain region in the images.
         intensity_threshold (int, optional): The Hounsfield Unit (HU) threshold to identify contrast agent presence. 
                                     Defaults to 150.
-        ratio_threshold (float, optional): The threshold for the ratio of contrast agent signal change 
+        bolus_threshold (float, optional): The threshold for the ratio of contrast agent signal change 
                                         to determine the starting index. Defaults to 0.05.
 
     Returns:
@@ -28,11 +28,10 @@ def extract_ctc(volume_list, brain_mask, intensity_threshold=None, ratio_thresho
     """
 
     if image_type == 'ctp':
-        intensity_threshold=150
-        ratio_threshold=0.05
+        bolus_threshold=0.01
+
     if image_type == 'mrp': 
-        intensity_threshold=1600
-        ratio_threshold=0.1
+        bolus_threshold=0.01
 
         # For the visualization we want the contrast to be high values and the background to be low
         # Invert the image using global min and max across all volumes
@@ -40,57 +39,74 @@ def extract_ctc(volume_list, brain_mask, intensity_threshold=None, ratio_thresho
         global_min = min(np.min(vol) for vol in volume_list)
         volume_list = [global_max + global_min - i for i in volume_list]
 
-    # view_4d_img(volume_list, title="Inverted MRP", image_type=image_type)
-    
-    # For each timepoint, store the amount of contrast agent that is present in the volume
-    total_contrast_value = []
+    # For each timepoint, store the mean signal in the brain.
+    total_mean = []
     
     # Iterate through each time point in the image series
     nr_timepoints = len(volume_list)
-    contrast_masks = []  # Store contrast masks for each timepoint
-    
     for t in range(nr_timepoints):
         
         # Get the current volume at time point t
         current_volume = volume_list[t]
 
-        # Extract the pixels which we deem to be part of the contrast signal. 
-        # To be part of the contrast signal, pixels must be above the (HU) threshold and within the brain mask.
-        contrast_mask = (current_volume > intensity_threshold) & brain_mask
-        contrast_pixels = current_volume[contrast_mask.astype('bool')]
+        # Take the mean of the pixels in side the brain mask 
+        current_volume_mean = current_volume[brain_mask.astype('bool')].mean()
 
-        # Sum all contrast pixel values for this time point
-        volume_contrast_sum = contrast_pixels.sum()
-        
-        # Add this volume's contrast sum to the list
-        total_contrast_value.append(volume_contrast_sum)
-        
-        # Store the contrast mask for this timepoint
-        contrast_masks.append(contrast_mask)
+        # Add this volume's mean to the list
+        total_mean.append(current_volume_mean)
+    
 
-    # Stack all contrast masks into a 4D array
-    contrast_masks_4d = np.stack(contrast_masks, axis=0)
-    
-    # view_4d_img(contrast_masks_4d, title="4D Contrast Mask", image_type=image_type) 
-    
     # Normalize the total contrast agent value by the first volume, to remove the baseline
-    total_contrast_value = (total_contrast_value - total_contrast_value[0]) / total_contrast_value[0]
+    total_mean = (total_mean - total_mean[0]) / total_mean[0]
     
     # Extract the volume and index where the contrast agent starts to appear,
-    # S0 is the baseline volume just before the actual contrast agent inflow
-    cands = np.where(total_contrast_value > ratio_threshold)[0]
-    if cands.shape[0] == 0:
-        raise ValueError("No significant contrast agent presence detected.")
-    s0_index = cands[0]
+    # S0 is the baseline volume just before the actual contrast agent inflow   
+    # If the difference between the mean up to the current time point and the mean up to the next time point is smaller than the threshold, 
+    # we go on to the next time point.
+    s0_index = None
+    differences = []
     
+    for t in range(nr_timepoints - 1):
+        if t < 2:  # we skip the first few timepoints, this gives us a more stable signal. We don't expect the bolus to start within the first 3 timepoints.
+            differences.append(0)  # Store 0 for skipped timepoints
+            continue
+        # Calculate average over last 3 datapoints at time t and t+1
+        start_t = max(0, t - 2)  # Ensure we don't go below index 0
+        start_t_plus_1 = max(0, t - 1)  # Ensure we don't go below index 0
+        average_at_t = np.mean(total_mean[start_t:t + 1])
+        average_at_t_plus_1 = np.mean(total_mean[start_t_plus_1:t + 2])
+        difference = average_at_t_plus_1 - average_at_t
+        differences.append(difference)
+        if difference > bolus_threshold: # if the relative change is smaller than the threshold we skip
+            s0_index = t
+            break
+    if s0_index is None:
+        # If no step crosses the threshold, take the timepoint with the biggest positive difference
+        max_diff_index = np.argmax(differences)
+        s0_index = max_diff_index
+    s0_index = s0_index - 1 # We take the timepoint just before we see the big jump in contrast agent
+
+
     # Average the volumes before the contrast agent starts to appear, to make a more stable baseline (S0)
     volumes = np.stack(volume_list, axis=0)
     s0 = volumes[:s0_index,:,:,:].mean(axis=0)
-    
-    # Remove the baseline signal S0 from the images
-    # This leaves us with the contrast agent signal only
-    volumes = volumes - s0[np.newaxis, :, :, :]
-    # volumes[volumes < 0] = 0
+
+    if image_type == 'ctp':
+        # For CTP the relationship between contrast agent and image intensity is approximately linear.
+        # Because in CTP the iodine contrast directly attentuates the xrays, causing the image signal.
+        # Remove the baseline signal S0 from the images
+        # This leaves us with the contrast agent signal only
+        volumes = volumes - s0[np.newaxis, :, :, :]
+    if image_type == 'mrp':
+        # For MRP the gadolinium contrast doesn’t show up as a “signal” itself. 
+        # Instead, it changes relaxation times (mainly T2* and T1, depending on the sequence).
+        # The MR signal intensity is not linearly related to contrast concentration. 
+        # Instead, it depends on an exponential relationship between signal and relaxation times.
+        epsilon = 1e-8  # Small value to prevent division by zero
+        s0 = np.where(s0 == 0, epsilon, s0)
+        ratio = volumes / (s0[np.newaxis, :, :, :])
+        ratio = np.where(ratio <= 0, epsilon, ratio)  # Prevent log of zero or negative values
+        volumes = (1 / echo_time) * np.log(ratio)
     
     # Apply the brain mask
     volumes = volumes * brain_mask[np.newaxis, :, :, :]
@@ -98,9 +114,7 @@ def extract_ctc(volume_list, brain_mask, intensity_threshold=None, ratio_thresho
     # Unstack back into a list of 3d arrays
     volume_list = [volumes[i] for i in range(volumes.shape[0])]
 
-
-
-    return volume_list, s0_index, total_contrast_value
+    return volume_list, s0_index, total_mean
 
 def generate_ttp(ctc_img, time_index, s0_index, brain_mask, outside_value=-1):
     """
@@ -242,7 +256,7 @@ def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cS
         # Create block-circulant matrix
         G = toeplitz(colG, rowG)
         # Pad contrast data by doubling temporal dimension
-        ctc_img_pad = np.pad(ctc_img, [(0, ctc_img.shape[0]),] + [(0, 0)] * 3)
+        ctc_img_pad = np.pad(ctc_img, [(0, len(ctc_img)),] + [(0, 0)] * 3)
     elif method == 'bcSVD2':
         # Block-circulant SVD method 2 with manual matrix construction
         cmat = np.zeros([nr_timepoints, nr_timepoints])
@@ -259,7 +273,7 @@ def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cS
         # Construct 2x2 block matrix
         G = np.vstack([np.hstack([cmat, B]), np.hstack([B, cmat])])
         # Pad contrast data by doubling temporal dimension
-        ctc_img_pad = np.pad(ctc_img, [(0, ctc_img.shape[0]),] + [(0, 0)] * 3)
+        ctc_img_pad = np.pad(ctc_img, [(0, len(ctc_img)),] + [(0, 0)] * 3)
     else:
         raise NotImplementedError(f"method {method} is not supported.")
 

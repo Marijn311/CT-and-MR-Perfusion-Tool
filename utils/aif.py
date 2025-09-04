@@ -1,10 +1,9 @@
-import numpy as np
-from scipy.optimize import curve_fit
 from scipy.ndimage import binary_dilation, binary_erosion
+from scipy.optimize import curve_fit
 import cc3d
 import traceback
+import numpy as np
 import pandas as pd
-
 
 
 def gv(t, t0, alpha, beta, amplitude=1.0):
@@ -18,16 +17,15 @@ def gv(t, t0, alpha, beta, amplitude=1.0):
         beta: time constant
         amplitude: peak amplitude scaling factor
     """
+    # Standard gamma variate: A * (t-t0)^alpha * exp(-(t-t0)/beta) for t > t0
     t = np.array(t)
     t_shifted = np.maximum(0, t - t0)
-    # Standard gamma variate: A * (t-t0)^alpha * exp(-(t-t0)/beta) for t > t0
     result = np.zeros_like(t_shifted)
     mask = t > t0
     result[mask] = amplitude * (t_shifted[mask]**alpha) * np.exp(-t_shifted[mask]/beta)
     return result
 
 def fit_gv(time_index, curve, sigma=None):
-    # Updated bounds to include amplitude parameter
     # bounds: [t0_min, alpha_min, beta_min, amplitude_min], [t0_max, alpha_max, beta_max, amplitude_max]
     return curve_fit(gv, time_index, curve, bounds=([0, 0.1, 0.1, 0], [20, 8, 8, np.max(curve)*2]), sigma=sigma)
 
@@ -50,13 +48,9 @@ def calculate_signal_smoothness(signal):
     if len(signal) < 3:
         return float('inf')  # Cannot calculate second derivative for very short signals
     
-    # Calculate second derivative using finite differences
+    signal = (signal - np.min(signal)) / (np.max(signal) - np.min(signal))
     second_derivative = np.diff(signal, n=2)
-    
-    # Sum of squared second derivatives as smoothness metric
     smoothness = np.sum(second_derivative ** 2)
-    
-    # Normalize by signal length to make comparable across different signal lengths
     smoothness = smoothness / len(signal)
     
     return smoothness
@@ -71,9 +65,9 @@ def majority(array, ignore=None):
     else:
         return labels[np.argmax(counts)]
 
-def determine_aif(ctc_img, time_index, brain_mask, ttp, 
+def determine_aif(ctc_img, time_index, brain_mask, ttp,
             dilate_radius=5, erode_radius=2,
-            max_vol_thres=50, min_vol_thres=5, smoothness_threshold=30.0):
+            max_vol_thres=50, min_vol_thres=5, smoothness_threshold=0.04):
     """
     Identify the Arterial Input Function (AIF) from contrast-enhanced imaging data.
 
@@ -87,7 +81,7 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
         max_vol_thres (float, optional): Maximum volume threshold for AIF candidates. Defaults to 50.
         min_vol_thres (float, optional): Minimum volume threshold for AIF candidates. Defaults to 5.
         smoothness_threshold (float, optional): Maximum allowed smoothness metric for AIF candidates. 
-                                               Candidates with higher values (less smooth) will be rejected. Defaults to 10.0.
+                                               Candidates with higher values (less smooth) will be rejected. Defaults to 0.04.
 
     Returns:
         tuple:
@@ -137,7 +131,7 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
 
         # Perform connected component analysis to separate individual AIF candidates
         aif_candidate, nr_components = cc3d.connected_components(aif_candidate, return_N=True)
-        
+
         # Skip if no components found
         if nr_components == 0:
             continue
@@ -160,7 +154,7 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
             # Calculate signal smoothness
             smoothness = calculate_signal_smoothness(curve_mean)
             
-            # Skip candidates that are not smooth enough (exceed smoothness threshold)
+            # Skip candidates that are not smooth enough (lower smoothness means more smooth)
             if smoothness > smoothness_threshold:
                 continue
 
@@ -201,8 +195,6 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
             selected_smoothness = cands.iloc[bestCand].smoothness  # Smoothness of the selected candidate
             cands.loc[:, 'chosen'] = 0
             cands.loc[bestCand, 'chosen'] = 1  # Mark the selected candidate
-
-            
 
             # Return the AIF properties, binary mask of the selected region, mean error, and smoothness
             return aif_propperties, aif_candidate == aifSegIdx, cands.iloc[bestCand].mean_error, selected_smoothness

@@ -1,10 +1,9 @@
-import SimpleITK as sitk
 import os
 import numpy as np
+import SimpleITK as sitk
 from skimage import measure, segmentation
-from skimage.morphology import disk, binary_erosion, binary_dilation
 from scipy.ndimage import binary_fill_holes
-
+from skimage.morphology import disk, binary_erosion, binary_dilation
 
 
 def generate_brain_mask_ctp(volume, ctp_path):
@@ -131,8 +130,8 @@ def generate_brain_mask_mrp(volume, ctp_path):
             if region.area < max_area_3d:
                 mask[labeled_mask_3d == region.label] = 0
 
-    # Convert to unit8
-    mask = (mask * 255).astype(np.uint8)
+    # Convert to uint8
+    mask = mask.astype(np.uint8)
     
     # Save the generated mask to a file
     brain_mask_path = os.path.join(os.path.dirname(ctp_path), 'brain_mask.nii.gz')

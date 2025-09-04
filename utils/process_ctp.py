@@ -1,16 +1,16 @@
-from skimage.restoration import denoise_tv_chambolle
-from utils.generate_brain_mask import *
+from utils.loading_and_preprocessing import *
 from utils.generate_perfusion_maps import *
+from utils.generate_brain_mask import *
+from utils.foss_vs_commercial import *
 from utils.post_processing import *
 from utils.viewers import *
-from utils.loading_and_preprocessing import *
-from utils.foss_vs_commercial import *
 from utils.aif import *
-import nibabel as nib
-import numpy as np
 import os 
+import numpy as np
+import nibabel as nib
+from scipy.ndimage import gaussian_filter
 
-def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, brain_mask_path=None):
+def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, ECHO_TIME, brain_mask_path=None):
     """
     Process Computed Tomography Perfusion (CTP) scans to generate perfusion maps.
     This function performs a complete CTP analysis pipeline including image preprocessing,
@@ -42,6 +42,13 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, brain_mask_path=None
         - foss_tmax.nii.gz: Time to maximum of residue function map
     """ 
 
+    # Determine the projection type based on the image type
+    if IMAGE_TYPE == 'ctp':
+        projection = 'max'
+    elif IMAGE_TYPE == 'mrp':
+        projection = 'min'
+
+
     # ---------------------------------------------------------------------------------
     # Step 1: Read-in the 4D CTP .nii.gz scans, returns a list of 3D images and corresponding time indices
     # ---------------------------------------------------------------------------------
@@ -52,17 +59,18 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, brain_mask_path=None
     time_index = [i * SCAN_INTERVAL for i in time_index]
 
     if DEBUG == True:
-        view_4d_img(volume_list, title=f"Input {IMAGE_TYPE.upper()}", image_type=IMAGE_TYPE)
+        view_4d_img(volume_list, title=f"Input {IMAGE_TYPE.upper()}", projection=projection)
 
     # ---------------------------------------------------------------------------------
     # Step 2: Image preprocessing (smoothing and masking)
     # ---------------------------------------------------------------------------------
 
-    # Smooth the input image while keeping edges intact.
-    # volume_list = [denoise_tv_chambolle(i, weight=0.2) for i in volume_list]
+    # Smooth the input volunes to reduce noise and make results more stable 
+    # Unfortunately this step can be very slow.
+    volume_list = [gaussian_filter(volume, sigma=0.5) for volume in volume_list]
 
-    # if DEBUG == True:
-    #     view_4d_img(volume_list, title=f"Smoothed {IMAGE_TYPE.upper()}", image_type=IMAGE_TYPE)
+    if DEBUG == True:
+        view_4d_img(volume_list, title=f"Smoothed {IMAGE_TYPE.upper()}", projection=projection)
 
     # Either load a pre-existing brain mask or generate a one automatically
     if brain_mask_path is None:
@@ -73,20 +81,18 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, brain_mask_path=None
     else:
         brain_mask = load_image(brain_mask_path)
 
-    # if DEBUG == True:
-    #     view_brain_mask(brain_mask, volume_list)
+    if DEBUG == True:
+        view_brain_mask(brain_mask, volume_list)
 
     # ---------------------------------------------------------------------------------
     # Step 3: Concentration Time Curve (CTC) Generation
     # ---------------------------------------------------------------------------------
     
-    ctc_img, s0_index, total_contrast_value = extract_ctc(volume_list, brain_mask, image_type=IMAGE_TYPE) 
-
+    ctc_img, s0_index, bolus_data = extract_ctc(volume_list, brain_mask, echo_time=ECHO_TIME, image_type=IMAGE_TYPE) 
+  
     if DEBUG == True:
-        shows_contrast_curve(total_contrast_value, s0_index)
-
-    if DEBUG == True:
-            view_4d_img(ctc_img, title="Contrast Signal (Smoothed CTP Minus S0)", image_type=IMAGE_TYPE)
+            shows_contrast_curve(bolus_data, s0_index)
+            view_4d_img(ctc_img, title="Contrast Signal", projection='max')
 
     # ---------------------------------------------------------------------------------
     # Step 4: TTP (time-to-peak) map generation
@@ -95,7 +101,7 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, brain_mask_path=None
     ttp = generate_ttp(ctc_img, time_index, s0_index, brain_mask)
     
     if DEBUG == True:
-        show_perfusion_map(ttp, "TTP (Before Post-Processing)")
+        show_perfusion_map(ttp, "TTP (Before Post-Processing)", vmin=0, vmax=98)
     
     # ---------------------------------------------------------------------------------    
     # Step 5: Arterial input function (AIF) fitting
@@ -104,7 +110,7 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, brain_mask_path=None
     aif_propperties, aif_candidate_segmentations, mean_fitting_error, aif_smoothness = determine_aif(ctc_img, time_index, brain_mask, ttp)
 
     if DEBUG == True:
-        view_aif_selection(time_index, ctc_img, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness)
+        view_aif_selection(time_index, ctc_img, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness, vmin=1, vmax=98)
     
     # ---------------------------------------------------------------------------------
     # Step 6: Generate perfusion maps via deconvolution
@@ -113,11 +119,11 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, brain_mask_path=None
     mtt, cbv, cbf, tmax = generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, method='oSVD', cSVD_thres=0.1)
 
     if DEBUG == True:
-        show_perfusion_map(ttp, "TTP")
-        show_perfusion_map(cbf, "CBF")
-        show_perfusion_map(cbv, "CBV")
-        show_perfusion_map(mtt, "MTT")
-        show_perfusion_map(tmax, "TMAX")
+        show_perfusion_map(ttp, "TTP", vmin=1, vmax=99)
+        show_perfusion_map(cbf, "CBF", vmin=1, vmax=99)
+        show_perfusion_map(cbv, "CBV", vmin=1, vmax=99)
+        show_perfusion_map(mtt, "MTT", vmin=1, vmax=99)
+        show_perfusion_map(tmax, "TMAX", vmin=1, vmax=99)
 
     # ---------------------------------------------------------------------------------
     # Step 7: Post-processing (Whole brain normalization)
