@@ -201,7 +201,7 @@ def show_perfusion_map(volume, title, vmin=0, vmax=100):
 
 
 
-def view_aif_selection(time_index, img_ctc, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness, vmin=0, vmax=100):
+def view_aif_selection(time_index, img_ctc, aif_propperties, aif_candidate_segmentations, brain_mask, vmin=0, vmax=100):
     """
     Visualize the region from which the AIF is extracted.
     Visualize the CTC images in this region.
@@ -262,11 +262,11 @@ def view_aif_selection(time_index, img_ctc, aif_propperties, aif_candidate_segme
         ctc_image_rgb[aif_mask_slice] = [255, 0, 0]  # Set red color (RGB)
         
         ctc_img_overlay.set_data(ctc_image_rgb.astype('uint8'))
-        ax1.set_title(f'CTC With AIF Candidate Segmentation\n(Red: AIF Region)\nSlice {current_slice_idx+1}/{img_ctc.shape[1]}, Timepoint {current_time_idx+1}/{img_ctc.shape[0]}\nTime: {time_index[current_time_idx]:.1f}s')
+        ax1.set_title(f'Contrast Signal with AIF Segmentation\n(Red: AIF Region)\nSlice {current_slice_idx+1}/{img_ctc.shape[1]}, Timepoint {current_time_idx+1}/{img_ctc.shape[0]}\nTime: {time_index[current_time_idx]:.1f}s')
         
         # Update middle subplot (regular CTC)
         ctc_img.set_data(ctc_image)
-        ax2.set_title(f'Contrast Signal in Different Slices\n(Scroll Through Time with Mouse, Slices with Slider)\nSlice {current_slice_idx+1}/{img_ctc.shape[1]}, Timepoint {current_time_idx+1}/{img_ctc.shape[0]}\nTime: {time_index[current_time_idx]:.1f}s')
+        ax2.set_title(f'Contrast Signal\n(Scroll Through Time with Mouse)\nSlice {current_slice_idx+1}/{img_ctc.shape[1]}, Timepoint {current_time_idx+1}/{img_ctc.shape[0]}\nTime: {time_index[current_time_idx]:.1f}s')
 
         # Update the vertical line on the signal plot to show current time
         if hasattr(update_ctc_display, 'time_line'):
@@ -326,7 +326,7 @@ def view_aif_selection(time_index, img_ctc, aif_propperties, aif_candidate_segme
     ax3.plot(time_index, fitted_signal, label='Fitted Gamma Variate', linewidth=2)
     ax3.set_xlabel('Time (s)')
     ax3.set_ylabel('Signal Intensity')
-    ax3.set_title(f'AIF Diagnostic: Signal vs Fitted Model\nMean Fitting Error: {mean_fitting_error:.2f}, Smoothness: {aif_smoothness:.2f}')
+    ax3.set_title(f'AIF Diagnostic: Signal vs Fitted Model')
     ax3.legend()
     ax3.grid(True, alpha=0.3)
     
@@ -336,8 +336,6 @@ def view_aif_selection(time_index, img_ctc, aif_propperties, aif_candidate_segme
     
     # Initialize the display
     update_ctc_display()
-    
-    plt.tight_layout()
     plt.subplots_adjust(bottom=0.15)  # Make room for the slider
     plt.show()
 

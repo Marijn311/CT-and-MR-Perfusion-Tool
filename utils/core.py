@@ -1,31 +1,31 @@
-from utils.loading_and_preprocessing import *
 from utils.generate_perfusion_maps import *
+from utils.compare_to_reference import *
+from utils.load_and_preprocess import *
 from utils.generate_brain_mask import *
-from utils.foss_vs_commercial import *
-from utils.post_processing import *
+from utils.determine_aif import *
+from utils.post_process import *
 from utils.viewers import *
-from utils.aif import *
+from config import *
 import os 
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import gaussian_filter
 
-def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, ECHO_TIME, brain_mask_path=None):
+def core(perf_path, mask_path=None):
     """
-    Process Computed Tomography Perfusion (CTP) scans to generate perfusion maps.
-    This function performs a complete CTP analysis pipeline including image preprocessing,
-    concentration time curve extraction, arterial input function determination, and
-    perfusion parameter calculation using deconvolution methods.
+    Process perfusion scans (either CTP or MRP) to generate perfusion maps.
+    This function performs the complete processing pipeline, by calling on different modular functions. 
+
     
     Parameters
     ----------
-    ctp_path : str
+    perf_path : str
         Path to the 4D CTP .nii.gz scan file.
     SCAN_INTERVAL : float
         Time interval between consecutive 3D scans in seconds.
     DEBUG : bool
         If True, displays intermediate results and debugging visualizations.
-    brain_mask_path : str, optional
+    mask_path : str, optional
         Path to a pre-existing brain mask file. If None, a brain mask will be
         automatically generated and saved. Default is None.
     
@@ -42,24 +42,19 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, ECHO_TIME, brain_mas
         - foss_tmax.nii.gz: Time to maximum of residue function map
     """ 
 
-    # Determine the projection type based on the image type
-    if IMAGE_TYPE == 'ctp':
-        projection = 'max'
-    elif IMAGE_TYPE == 'mrp':
-        projection = 'min'
-
+   
 
     # ---------------------------------------------------------------------------------
     # Step 1: Read-in the 4D CTP .nii.gz scans, returns a list of 3D images and corresponding time indices
     # ---------------------------------------------------------------------------------
     
-    volume_list, time_index = load_image(ctp_path)
+    volume_list, time_index = load_image(perf_path)
 
     # Convert time index to seconds. For this we need to know the scan interval.
     time_index = [i * SCAN_INTERVAL for i in time_index]
 
     if DEBUG == True:
-        view_4d_img(volume_list, title=f"Input {IMAGE_TYPE.upper()}", projection=projection)
+        view_4d_img(volume_list, title=f"Input {IMAGE_TYPE.upper()}", projection=PROJECTION)
 
     # ---------------------------------------------------------------------------------
     # Step 2: Image preprocessing (smoothing and masking)
@@ -70,16 +65,16 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, ECHO_TIME, brain_mas
     volume_list = [gaussian_filter(volume, sigma=0.5) for volume in volume_list]
 
     if DEBUG == True:
-        view_4d_img(volume_list, title=f"Smoothed {IMAGE_TYPE.upper()}", projection=projection)
+        view_4d_img(volume_list, title=f"Smoothed {IMAGE_TYPE.upper()}", projection=PROJECTION)
 
     # Either load a pre-existing brain mask or generate a one automatically
-    if brain_mask_path is None:
+    if mask_path is None:
         if IMAGE_TYPE == 'ctp':
-            brain_mask, brain_mask_path = generate_brain_mask_ctp(volume_list[0], ctp_path)
+            brain_mask, mask_path = generate_brain_mask_ctp(volume_list[0], perf_path)
         if IMAGE_TYPE == 'mrp':
-            brain_mask, brain_mask_path = generate_brain_mask_mrp(volume_list[0], ctp_path)
+            brain_mask, mask_path = generate_brain_mask_mrp(volume_list[0], perf_path)
     else:
-        brain_mask = load_image(brain_mask_path)
+        brain_mask = load_image(mask_path)
 
     if DEBUG == True:
         view_brain_mask(brain_mask, volume_list)
@@ -88,7 +83,7 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, ECHO_TIME, brain_mas
     # Step 3: Concentration Time Curve (CTC) Generation
     # ---------------------------------------------------------------------------------
     
-    ctc_img, s0_index, bolus_data = extract_ctc(volume_list, brain_mask, echo_time=ECHO_TIME, image_type=IMAGE_TYPE) 
+    ctc_img, s0_index, bolus_data = extract_ctc(volume_list, brain_mask) 
   
     if DEBUG == True:
             shows_contrast_curve(bolus_data, s0_index)
@@ -107,16 +102,16 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, ECHO_TIME, brain_mas
     # Step 5: Arterial input function (AIF) fitting
     # ---------------------------------------------------------------------------------
 
-    aif_propperties, aif_candidate_segmentations, mean_fitting_error, aif_smoothness = determine_aif(ctc_img, time_index, brain_mask, ttp)
+    aif_propperties, aif_candidate_segmentations  = determine_aif(ctc_img, time_index, brain_mask, ttp)
 
     if DEBUG == True:
-        view_aif_selection(time_index, ctc_img, aif_propperties, aif_candidate_segmentations, brain_mask, mean_fitting_error, aif_smoothness, vmin=1, vmax=98)
+        view_aif_selection(time_index, ctc_img, aif_propperties, aif_candidate_segmentations, brain_mask, vmin=1, vmax=98)
     
     # ---------------------------------------------------------------------------------
     # Step 6: Generate perfusion maps via deconvolution
     # ---------------------------------------------------------------------------------
     
-    mtt, cbv, cbf, tmax = generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, method='oSVD', cSVD_thres=0.1)
+    mtt, cbv, cbf, tmax = generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties)
 
     if DEBUG == True:
         show_perfusion_map(ttp, "TTP", vmin=1, vmax=99)
@@ -147,10 +142,10 @@ def process_ctp(ctp_path, SCAN_INTERVAL, DEBUG, IMAGE_TYPE, ECHO_TIME, brain_mas
     tmax_nii = nib.Nifti1Image(np.transpose(tmax, (2, 1, 0)), np.eye(4))
 
     # Save the transposed arrays as NIfTI files
-    nib.save(ttp_nii, os.path.join(os.path.dirname(ctp_path), "perfusion-maps", 'foss_ttp.nii.gz'))
-    nib.save(mtt_nii, os.path.join(os.path.dirname(ctp_path), "perfusion-maps", 'foss_mtt.nii.gz'))
-    nib.save(cbv_nii, os.path.join(os.path.dirname(ctp_path), "perfusion-maps", 'foss_cbv.nii.gz'))
-    nib.save(cbf_nii, os.path.join(os.path.dirname(ctp_path), "perfusion-maps", 'foss_cbf.nii.gz'))
-    nib.save(tmax_nii, os.path.join(os.path.dirname(ctp_path), "perfusion-maps", 'foss_tmax.nii.gz'))
+    nib.save(ttp_nii, os.path.join(os.path.dirname(perf_path), "perfusion-maps", 'foss_ttp.nii.gz'))
+    nib.save(mtt_nii, os.path.join(os.path.dirname(perf_path), "perfusion-maps", 'foss_mtt.nii.gz'))
+    nib.save(cbv_nii, os.path.join(os.path.dirname(perf_path), "perfusion-maps", 'foss_cbv.nii.gz'))
+    nib.save(cbf_nii, os.path.join(os.path.dirname(perf_path), "perfusion-maps", 'foss_cbf.nii.gz'))
+    nib.save(tmax_nii, os.path.join(os.path.dirname(perf_path), "perfusion-maps", 'foss_tmax.nii.gz'))
 
-    return brain_mask_path
+    return mask_path

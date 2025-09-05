@@ -1,9 +1,10 @@
 import numpy as np
-from utils.aif import gv
+from utils.determine_aif import gv
+from config import *
 from scipy.linalg import toeplitz
 
 
-def extract_ctc(volume_list, brain_mask, echo_time, bolus_threshold=None, image_type=None):
+def extract_ctc(volume_list, brain_mask):
     """
     Extracts the Contrast Time Curve (CTC) from a sequence of CTP/MRP images.
 
@@ -15,10 +16,8 @@ def extract_ctc(volume_list, brain_mask, echo_time, bolus_threshold=None, image_
     Parameters:
         volume_list (list of SimpleITK.Image): A list of raw CTP images representing a time series.
         brain_mask (SimpleITK.Image): A binary mask indicating the brain region in the images.
-        intensity_threshold (int, optional): The Hounsfield Unit (HU) threshold to identify contrast agent presence. 
-                                    Defaults to 150.
         bolus_threshold (float, optional): The threshold for the ratio of contrast agent signal change 
-                                        to determine the starting index. Defaults to 0.05.
+                                        to determine the starting index. Defaults to 0.01.
 
     Returns:
         tuple: A tuple containing:
@@ -27,10 +26,10 @@ def extract_ctc(volume_list, brain_mask, echo_time, bolus_threshold=None, image_
             - s0_index (int): The starting index of significant contrast agent presence.
     """
 
-    if image_type == 'ctp':
+    if IMAGE_TYPE == 'ctp':
         bolus_threshold=0.01
 
-    if image_type == 'mrp': 
+    if IMAGE_TYPE == 'mrp': 
         bolus_threshold=0.01
 
         # For the visualization we want the contrast to be high values and the background to be low
@@ -91,13 +90,13 @@ def extract_ctc(volume_list, brain_mask, echo_time, bolus_threshold=None, image_
     volumes = np.stack(volume_list, axis=0)
     s0 = volumes[:s0_index,:,:,:].mean(axis=0)
 
-    if image_type == 'ctp':
+    if IMAGE_TYPE == 'ctp':
         # For CTP the relationship between contrast agent and image intensity is approximately linear.
         # Because in CTP the iodine contrast directly attentuates the xrays, causing the image signal.
         # Remove the baseline signal S0 from the images
         # This leaves us with the contrast agent signal only
         volumes = volumes - s0[np.newaxis, :, :, :]
-    if image_type == 'mrp':
+    if IMAGE_TYPE == 'mrp':
         # For MRP the gadolinium contrast doesn’t show up as a “signal” itself. 
         # Instead, it changes relaxation times (mainly T2* and T1, depending on the sequence).
         # The MR signal intensity is not linearly related to contrast concentration. 
@@ -106,7 +105,7 @@ def extract_ctc(volume_list, brain_mask, echo_time, bolus_threshold=None, image_
         s0 = np.where(s0 == 0, epsilon, s0)
         ratio = volumes / (s0[np.newaxis, :, :, :])
         ratio = np.where(ratio <= 0, epsilon, ratio)  # Prevent log of zero or negative values
-        volumes = (1 / echo_time) * np.log(ratio)
+        volumes = (1 / ECHO_TIME) * np.log(ratio)
     
     # Apply the brain mask
     volumes = volumes * brain_mask[np.newaxis, :, :, :]
@@ -169,7 +168,7 @@ def generate_ttp(ctc_img, time_index, s0_index, brain_mask, outside_value=-1):
     return ttp
 
 
-def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cSVD_thres=0.1, method='bcSVD1', outside_value=-1):
+def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, outside_value=-1):
     """
     Generate perfusion maps (MTT, CBV, CBF, tmax) from CT perfusion data using deconvolution methods.
     This function performs deconvolution of tissue concentration curves with an arterial input function (AIF)
@@ -189,9 +188,9 @@ def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cS
     brain_mask : Binary mask defining brain tissue regions (1 = brain, 0 = background)
     aif_propperties : list or numpy.ndarray
         Arterial input function values or fitting parameters for AIF estimation
-    cSVD_thres : float, optional
+    CSVD_THRES : float, optional
         SVD threshold for regularization as fraction of maximum singular value (default: 0.1)
-    method : str, optional
+    METHOD : str, optional
         Deconvolution method - 'oSVD', 'bcSVD1', or 'bcSVD2' (default: 'bcSVD1')
         - 'oSVD': Original SVD using Toeplitz matrix
         - 'bcSVD1': Block-circulant SVD method 1 with padding
@@ -214,7 +213,7 @@ def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cS
     """
         
     # Define tissue constants: density (g/ml) and hematocrit correction factor
-    rho, H = 1.05, 0.85
+    rho, H = 1.05, 0.73
     
     # Generate AIF values if parameters are provided, otherwise use direct values
     if len(aif_propperties) != len(time_index):
@@ -232,11 +231,11 @@ def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cS
     nr_timepoints = len(time_index)  
 
     # Construct convolution matrix G based on selected deconvolution method
-    if method == 'oSVD':
+    if METHOD == 'oSVD':
         # Original SVD method using standard Toeplitz matrix
         G = toeplitz(aif_value, np.zeros(nr_timepoints))
         ctc_img_pad = ctc_img
-    elif method == 'bcSVD1':
+    elif METHOD == 'bcSVD1':
         # Block-circulant SVD method 1 with Simpson's rule integration
         colG = np.zeros(2 * nr_timepoints)
         colG[0] = aif_value[0]
@@ -257,7 +256,7 @@ def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cS
         G = toeplitz(colG, rowG)
         # Pad contrast data by doubling temporal dimension
         ctc_img_pad = np.pad(ctc_img, [(0, len(ctc_img)),] + [(0, 0)] * 3)
-    elif method == 'bcSVD2':
+    elif METHOD == 'bcSVD2':
         # Block-circulant SVD method 2 with manual matrix construction
         cmat = np.zeros([nr_timepoints, nr_timepoints])
         B = np.zeros([nr_timepoints, nr_timepoints])
@@ -275,13 +274,13 @@ def generate_perfusion_maps(ctc_img, time_index, brain_mask, aif_propperties, cS
         # Pad contrast data by doubling temporal dimension
         ctc_img_pad = np.pad(ctc_img, [(0, len(ctc_img)),] + [(0, 0)] * 3)
     else:
-        raise NotImplementedError(f"method {method} is not supported.")
+        raise NotImplementedError(f"method {METHOD} is not supported.")
 
     # Perform SVD decomposition on scaled convolution matrix
     U, S, V = np.linalg.svd(G * deltaT)
     
     # Apply threshold-based regularization to singular values
-    thres = cSVD_thres * np.max(S)
+    thres = CSVD_THRES * np.max(S)
     filteredS = 1 / (S + 1e-5)  # Add small epsilon to avoid division by zero
     filteredS[S < thres] = 0  # Zero out small singular values below threshold
     

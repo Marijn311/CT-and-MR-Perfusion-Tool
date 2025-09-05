@@ -1,21 +1,21 @@
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from skimage.metrics import structural_similarity as ssim
-from utils.loading_and_preprocessing import *
-from utils.post_processing import *
+from utils.load_and_preprocess import *
+from utils.post_process import *
 from utils.viewers import *
+from config import *
 import os
 import numpy as np
 import scipy.stats
 import pandas as pd
 
 
-def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_path, gen_tmax_path, com_cbf_path, com_cbv_path, com_mtt_path, com_ttp_path, com_tmax_path, brain_mask_path, plot):
+def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_path, gen_tmax_path, com_cbf_path, com_cbv_path, com_mtt_path, com_ttp_path, com_tmax_path, mask_path):
     """
     Compare generated perfusion maps with commercially generated maps.
     
-    This function loads commercial perfusion maps, reorients them to match the generated maps,
-    normalizes them using their own whole brain mean values, and calculates similarity metrics
-    between the generated and commercial maps for each perfusion parameter.
+    This function calculates similarity metrics between the generated and commercial maps for each perfusion parameter.
+    Next it displays the images side-by-side for visual comparison.
     
     Parameters:
         gen_cbf_path (str): Path to generated CBF map.
@@ -28,7 +28,7 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
         com_mtt_path (str): Path to commercially generated MTT map.
         com_ttp_path (str): Path to commercially generated TTP map.
         com_tmax_path (str): Path to commercially generated Tmax map.
-        mask (SimpleITK.Image): Brain mask used for comparison and normalization.
+        mask_path (str): Path to brain mask.
         plot (bool): If True, displays comparison plots for each perfusion map.
 
     Returns:
@@ -43,8 +43,8 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
     ttp = load_image(gen_ttp_path)
     tmax = load_image(gen_tmax_path)
 
-    #load the mask
-    brain_mask = load_image(brain_mask_path)
+    # Load the mask
+    brain_mask = load_image(mask_path)
 
     # Check which commercial files exist and load only available ones
     commercial_paths = {
@@ -68,11 +68,8 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
     for map_type, img in available_commercial.items():
         commercial_data[map_type] = img
 
-    # Normalize the available commercial maps with their own whole brain mean
-    # This was also done to the generated maps.
-    # This helps the image to look more similar visually if we dont want to tune the parameters that determine the absolute values.
+    # Apply the same post-processing to the commercial maps
     for map_type, img in commercial_data.items():
-        # Apply the same post-processing to the commercial maps
         commercial_data[map_type] = post_process_perfusion_map(img, brain_mask, map_type)
 
     # Define perfusion maps for comparison
@@ -110,44 +107,30 @@ def compare_perfusion_maps(gen_cbf_path, gen_cbv_path, gen_mtt_path, gen_ttp_pat
         print(f"Root Mean Squared Error: {metrics['rmse']:.3f}")
         
         # Display side-by-side comparison
-        if plot:
+        if SHOW_COMPARISONS:
             show_comparison_maps(generated, commercial, map_name, brain_mask, apply_mask=False)
 
     return all_metrics
 
 
 def calculate_similarity_metrics(generated, commercial, mask, apply_mask):
-    """Calculate comprehensive similarity metrics between generated and commercial perfusion maps.
+    """
+    Calculate comprehensive similarity metrics between generated and commercial perfusion maps.
     This function computes multiple similarity metrics (NCC, SSIM, MSE, MAE, RMSE) between 
     two perfusion maps while handling different brain masks and background values appropriately.
     The comparison can be made more fair by optionally masking the commercial maps with the 
     generated maps' mask.
-    Parameters
-    ----------
-    generated : numpy.ndarray
-        The generated perfusion map (2D or 3D array).
-    commercial : numpy.ndarray
-        The commercial perfusion map to compare against (same shape as generated).
-    mask : numpy.ndarray
-        Binary brain mask (same shape as input maps) where 1 indicates brain tissue 
-        and 0 indicates background.
-    apply_mask : bool
-        If True, applies a mask to make sure we only consider pixels which are non-background in both images.
-
-    Returns
-    -------
-    dict
-        Dictionary containing similarity metrics:
-        - 'ncc' : float
-            Normalized Cross-Correlation coefficient [-1, 1]
-        - 'ssim' : float
-            Structural Similarity Index [0, 1]
-        - 'mse' : float
-            Mean Squared Error
-        - 'mae' : float
-            Mean Absolute Error
-        - 'rmse' : float
-            Root Mean Squared Error    
+    
+    Parameters:
+        generated : numpy.ndarray
+            The generated perfusion map (2D or 3D array).
+        commercial : numpy.ndarray
+            The commercial perfusion map to compare against (same shape as generated).
+        mask : numpy.ndarray
+            Binary brain mask (same shape as input maps) where 1 indicates brain tissue 
+            and 0 indicates background.
+        apply_mask : bool
+            If True, applies a mask to make sure we only consider pixels which are non-background in both images.
     """
 
     # Find the mode and set it to NaN. This mode value is the background value.
@@ -204,14 +187,12 @@ def calculate_similarity_metrics(generated, commercial, mask, apply_mask):
 
 
 def average_metrics_on_dataset(all_metrics):
+    """Calculate average similarity metrics across multiple subjects for perfusion map comparisons.
+    This function processes similarity metrics from multiple subjects, computes statistical
+    summaries (mean, median, standard deviation) for each metric type, and saves results
+    to an Excel file for further analysis.
     """
-    all_metrics is a list of dictionaries containing similarity metrics for each comparison that was made.
-    This function averages the metrics across all subjects and returns the result.
-
-    for each metric it gives the mean, median, and standard deviation across all subjects.
-
-    """ 
-    
+ 
     # Filter out empty dictionaries (subjects with no commercial maps)
     valid_metrics = [metrics for metrics in all_metrics if metrics]
     

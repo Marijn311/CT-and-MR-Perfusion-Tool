@@ -1,7 +1,6 @@
 from scipy.ndimage import binary_dilation, binary_erosion
 from scipy.optimize import curve_fit
 import cc3d
-import traceback
 import numpy as np
 import pandas as pd
 
@@ -27,7 +26,8 @@ def gv(t, t0, alpha, beta, amplitude=1.0):
 
 def fit_gv(time_index, curve, sigma=None):
     # bounds: [t0_min, alpha_min, beta_min, amplitude_min], [t0_max, alpha_max, beta_max, amplitude_max]
-    return curve_fit(gv, time_index, curve, bounds=([0, 0.1, 0.1, 0], [20, 8, 8, np.max(curve)*2]), sigma=sigma)
+    popts, _ = curve_fit(gv, time_index, curve, bounds=([0, 0.1, 0.1, 0], [20, 8, 8, np.max(curve)*2]), sigma=sigma)
+    return popts
 
 def targetF(x_obs, y_obs):
     def gv_target(t0, alpha, beta, amplitude=1.0):
@@ -70,11 +70,15 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
             max_vol_thres=50, min_vol_thres=5, smoothness_threshold=0.04):
     """
     Identify the Arterial Input Function (AIF) from contrast-enhanced imaging data.
+    The function uses adaptive thresholding with progressively relaxed criteria to identify AIF candidates
+    based on AUC (Area Under Curve), TTP (Time-to-Peak) percentiles, and signal smoothness. Morphological 
+    operations are applied to refine candidates, and the best candidate is selected based on a score 
+    combining volume, peak difference, smoothness, and fitting error.
 
     Parameters:
         ctc_img (numpy.ndarray): Contrast Time Curve (CTC) data as a 4D array.
         time_index (numpy.ndarray): Time indices corresponding to the CTC data.
-        brain_mask (SimpleITK.Image): Binary mask indicating the brain region.
+        brain_mask (numpy.ndarray): Binary mask indicating the brain region.
         ttp (numpy.ndarray): Time-to-peak values for each voxel.
         dilate_radius (int, optional): Radius for dilation operation during morphological filtering. Defaults to 5.
         erode_radius (int, optional): Radius for erosion operation during morphological filtering. Defaults to 2.
@@ -89,15 +93,6 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
             - aif_candidate (numpy.ndarray): Binary mask of the selected AIF region.
             - mean_error (float): Mean fitting error between the actual AIF signal and the fitted gamma variate function.
             - smoothness (float): Smoothness metric of the selected AIF signal.
-
-    Raises:
-        ValueError: If no AIF candidates are found after all adaptive thresholding attempts.
-
-    Notes:
-        The function uses adaptive thresholding with progressively relaxed criteria to identify AIF candidates
-        based on AUC (Area Under Curve), TTP (Time-to-Peak) percentiles, and signal smoothness. Morphological 
-        operations are applied to refine candidates, and the best candidate is selected based on a score 
-        combining volume, peak difference, and fitting error.
     """
 
     # Erode the brain mask with a flat kernel
@@ -160,10 +155,9 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
 
             try:
                 # Fit a gamma variate function to the mean CTC curve
-                popts, _ = fit_gv(time_index, curve_mean)
+                popts = fit_gv(time_index, curve_mean)
             except:
-                # Handle fitting errors
-                traceback.print_exc()
+                # If fitting fails, skip this candidate
                 continue
 
             # Calculate the fitting error for the candidate region
@@ -196,8 +190,8 @@ def determine_aif(ctc_img, time_index, brain_mask, ttp,
             cands.loc[:, 'chosen'] = 0
             cands.loc[bestCand, 'chosen'] = 1  # Mark the selected candidate
 
-            # Return the AIF properties, binary mask of the selected region, mean error, and smoothness
-            return aif_propperties, aif_candidate == aifSegIdx, cands.iloc[bestCand].mean_error, selected_smoothness
+            # Return the AIF properties, binary mask of the selected region
+            return aif_propperties, aif_candidate == aifSegIdx
     
     # If no candidates found after all attempts
     raise ValueError("No AIF candidates found after adaptive thresholding attempts.")
