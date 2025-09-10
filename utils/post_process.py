@@ -1,27 +1,27 @@
 import numpy as np
 from scipy.ndimage import binary_erosion
 
-def post_process_perfusion_map(generated_volume, brain_mask, img_name):
+def post_process_perfusion_map(perfusion_map, mask, perf_map_type):
     """
-    Post-process perfusion maps by normalizing and applying filters.
-    This function normalizes perfusion maps using whole brain mean normalization
-    to enable relative comparison between groups rather than absolute values.
+    Post-process perfusion maps.I chose to normalize the maps using whole brain mean. 
+    For my purposes I dont need absolute quantification of perfusion values, but relative comparison between groups.
+
+    Parameters:
+        - perfusion_map (nd.array): 3D array (z,y,x) of a perfusion map to be post-processed.
+        - mask (nd.array): 3D array (z,y,x) of the brain mask.
+        - perf_map_type (str): Type of perfusion map ('CBF', 'CBV', etc) in case different maps require specific processing.
+    Returns:
+        - perfusion_map (nd.array): 3D array (z,y,x) the post-processed perfusion map.
+    
     """
 
-    # In the commercial toolbox, the perfusion maps are multiplied with some constant values.
-    # This makes the perfusion values in the commercial maps closer to reality when you look at the units of these maps.
-    # However, for my purpose I am comparing perfusion maps between groups. I do not care about the absolute values, but rather the relative differences.
-    # Hence, I normalize both volumes with their own whole brain mean.
-    # This also helps to get the commercial and generated maps in the same range for visual comparison.
-
-    # Erode the brain mask with a flat kernel
-    # Due to the patient motion, skull can fall inside the mask at the edges.
-    # to get a more stable result we shrink the mask a bit before extracting the mean.  
+    # Due to slight patient motion, the skull can still fall inside the mask at the edges.
+    # Therefore we erode the brain mask with a flat kernel to get a more accurate mean value.  
     
     kernel = np.ones((1, 15, 15), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
-    brain_mask = binary_erosion(brain_mask, kernel)
-    gen = generated_volume[brain_mask == 1]
+    mask = binary_erosion(mask, kernel)
+    gen = perfusion_map[mask == 1]
     gen_mean = np.mean(gen)
-    generated_volume = (generated_volume - gen_mean) / gen_mean
+    perfusion_map = (perfusion_map - gen_mean) / gen_mean
 
-    return generated_volume
+    return perfusion_map

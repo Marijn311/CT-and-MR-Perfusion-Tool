@@ -3,38 +3,37 @@ import numpy as np
 import SimpleITK as sitk
 from skimage import measure, segmentation
 from scipy.ndimage import binary_fill_holes
+from utils.load_and_preprocess import reorient_to_ras
 from skimage.morphology import disk, binary_erosion, binary_dilation
 
 
-def generate_brain_mask_ctp(volume, perf_path):
+def generate_mask_ctp(volume, perf_path, bone_threshold=300, fast_marching_threshold=400):
     """
-    Generate a brain mask from a CT perfusion volume using fast marching segmentation.
-    This function creates a binary brain mask by identifying the largest bone structure
+    Generate a brain mask from a 3D CT perfusion volume.
+    This function creates a binary brain mask by identifying the largest connected bone structure (the skull)
     as a seed point and using fast marching algorithm to segment the brain region.
-    Args:
-        volume (numpy.ndarray): 3D CT perfusion volume array
-        perf_path (str): Path to the perfusion file, used to determine output directory
+    
+    Parameters:
+        volume (numpy.ndarray): 3D CT perfusion volume array (z, y, x)
+        perf_path (str): Path to the perfusion file, used to determine output directory for saving the generated mask.
+        bone_threshold (int): Intensity threshold to identify bone structures in the CT image.
+        fast_marching_threshold (int): Stopping value for the fast marching algorithm to define the brain region.
     Returns:
         tuple: A tuple containing:
-            - mask (numpy.ndarray): Binary brain mask as a 3D array
+            - mask (numpy.ndarray): Binary brain mask as a 3D array (z, y, x)
             - mask_path (str): Path where the brain mask was saved
     """
 
-
     print("Generating a brain mask...")
-    # Convert the input array to sitk image
-    volume = sitk.GetImageFromArray(volume)
-    
-    # Set the orientation to RAS 
-    volume.SetDirection((1.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0,
-                    0.0, 0.0, 1.0))
+
+    image = sitk.GetImageFromArray(volume)
+    image = reorient_to_ras(image)
     
     # Smooth the input image using a Gaussian filter to reduce noise
-    volume= sitk.DiscreteGaussian(volume)
+    image = sitk.DiscreteGaussian(image)
 
-    # Identify connected components in the image where intensity is greater than 300 (likely bone regions)
-    boneLabelMap = sitk.ConnectedComponent(volume > 300)
+    # Identify connected components in the image where intensity is greater than the bone threshold
+    boneLabelMap = sitk.ConnectedComponent(image > bone_threshold)
 
     # Compute statistics for each connected component
     label_statistics = sitk.LabelShapeStatisticsImageFilter()
@@ -42,7 +41,7 @@ def generate_brain_mask_ctp(volume, perf_path):
 
     # Extract labels, centroids, and physical sizes of connected components
     label_list = [
-        (i, volume.TransformPhysicalPointToIndex(label_statistics.GetCentroid(i)), label_statistics.GetPhysicalSize(i))
+        (i, image.TransformPhysicalPointToIndex(label_statistics.GetCentroid(i)), label_statistics.GetPhysicalSize(i))
         for i in label_statistics.GetLabels()
     ]
 
@@ -50,37 +49,41 @@ def generate_brain_mask_ctp(volume, perf_path):
     seed = max(label_list, key=lambda x: x[2])[1]
 
     # Compute the gradient magnitude of the image to highlight edges
-    feature_volume = sitk.GradientMagnitudeRecursiveGaussian(volume, sigma=0.5)
+    feature_image = sitk.GradientMagnitudeRecursiveGaussian(image, sigma=0.5)
 
     # Compute the reciprocal of the gradient magnitude to create a speed image for fast marching
-    speed_volume = sitk.BoundedReciprocal(feature_volume)
+    speed_image = sitk.BoundedReciprocal(feature_image)
 
     # Initialize the fast marching filter with the seed point and stopping value
     fm_filter = sitk.FastMarchingBaseImageFilter()
     fm_filter.SetTrialPoints([seed])
-    fm_filter.SetStoppingValue(400)
+    fm_filter.SetStoppingValue(fast_marching_threshold)
 
     # Perform fast marching to segment the region around the seed point
-    fm_volume = fm_filter.Execute(speed_volume)
+    fm_image = fm_filter.Execute(speed_image)
 
     # Create a binary mask by thresholding the fast marching result
-    mask = fm_volume < 400
-    
+    mask = fm_image < fast_marching_threshold
+
     # Save the generated brain mask to a file
     mask_path = os.path.join(os.path.dirname(perf_path), 'brain_mask.nii.gz')
     sitk.WriteImage(mask, mask_path)
+    
     mask = sitk.GetArrayFromImage(mask)
 
     return mask, mask_path
 
 
 
-def generate_brain_mask_mrp(volume, perf_path):
+def generate_mask_mrp(volume, perf_path, brain_threshold=100):
     """
-    Generate a brain mask from a 3D volume using morphological active contours.
-    Args:
+    Generate a brain mask from a 3D mrp volume.
+    This function generates a brain mask by using simple thresholding and morphological active contours.
+    
+    Parameters:
         volume (numpy.ndarray): 3D input volume data
         perf_path (str): Path to the CTP file, used to determine output directory
+        brain_threshold (int): Intensity threshold to create the initial seed for the active contour segmentation.
     Returns:
         tuple: A tuple containing:
             - mask (numpy.ndarray): Binary brain mask as uint8 array
@@ -91,20 +94,19 @@ def generate_brain_mask_mrp(volume, perf_path):
     mask = np.zeros(volume.shape)  
 
     # Make a 3D binary mask, this is needed as input for the active contours.
-    seed_mask = volume > 100
-    
+    seed_mask = volume > brain_threshold
+
     # Perform the segmentation using active contours
-    mask = segmentation.morphological_chan_vese(volume, num_iter=300, 
-                                                       init_level_set=seed_mask)
-    mask = mask.astype(float)
+    mask = segmentation.morphological_chan_vese(volume, num_iter=300, init_level_set=seed_mask).astype(float)
     
-    # Per slice: Fill the holes in the mask, and remove small unconnected components
+    # Refine the mask with slice-wise morphological operations 
     for s in range(volume.shape[0]):
         mask_slice = mask[s, :, :] 
 
-        # Sometimes a bit of the skull is still attached in the segmentation because some part
-        # of the skull was very close to the brain. To remove this, we erode the mask a bit. 
-        # This will hopefully un-connect the skull fragments from the brain in 3D.
+        # Sometimes a bit of the skull is still included in the segmentation of the active contour.
+        # This may happen if the skull seems to touch the brain for example. 
+        # To remove these skull fragments, we erode the mask a bit. 
+        # This will hopefully un-connect the skull fragments from the brain.
         # Then we remove all components that are not attached to the main component (which is the brain).  
         # Then we dilate the mask again to get the original size of the brain mask back.
         # This also smooths the mask a bit.
@@ -123,11 +125,13 @@ def generate_brain_mask_mrp(volume, perf_path):
                     mask_slice[labeled_mask == region.label] = 0
         
         mask_slice = binary_dilation(mask_slice, structure_element)
-        
-        # Fill holes in the slice and update the mask to include the slice version with filled holes
+
+        # Fill holes in the slice and replace the mask slice with the post-processed slice
         mask[s, :, :] = binary_fill_holes(mask_slice)
     
-    # Remove all components that are not attached to the main component in 3D
+    # Remove all components that are not attached to the main component in 3D.
+    # One of the lower slices may have some small components, the slice-wise processing keeps the largest component per slice,
+    # but these components may not be connected to the actual brain in 3D.   
     labeled_mask_3d = measure.label(mask)
     regions_3d = measure.regionprops(labeled_mask_3d)
     

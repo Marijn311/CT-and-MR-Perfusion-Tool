@@ -1,18 +1,19 @@
 
-DATASET_PATH = r"demo_data_unitobrain"      # Path to the dataset directory containing CTP scans
-SCAN_INTERVAL = 1.0                         # Time between two 3D consecutive volumes in seconds
+DATASET_PATH = r"demo_data_isles24"      # Path to the dataset directory containing CTP scans
+SCAN_INTERVAL = 2.0                         # Time between two 3D consecutive volumes in seconds
 ECHO_TIME = 0.03                            # Echo time in seconds (only for MRP)
 IMAGE_TYPE = 'ctp'                          # Either 'mrp' or 'ctp'
-METHOD = 'oSVD'                             # Which deconvolution method to use, either 'bcSVD1', 'bcSVD2' or 'oSVD'
-CSVD_THRES = 0.1                            # Threshold for the SVD truncation in case of the block-circulant SVD methods    
+METHOD = 'SVD'                             # Which deconvolution method to use, either 'bcSVD1', 'bcSVD2', 'SVD', or 'nlr'
 DEBUG = True                               # if True, shows plots during processing to visualize intermediate results
-SHOW_COMPARISONS = True                     # If True, shows comparison plots between generated and reference perfusion maps
-
-
+GENERATE_PERFUSION_MAPS = True          # If True, generates perfusion maps from the inputted perfusion data
+SHOW_COMPARISONS = True                    # If True, shows comparison plots between generated and reference perfusion maps
+CALCULATE_METRICS = True                 # If True, calculates similarity metrics between generated and reference perfusion maps
 
 # --------------------------------------------------------------------------
 assert IMAGE_TYPE in ['ctp', 'mrp'], "IMAGE_TYPE must be either 'ctp' or 'mrp'"
-assert METHOD in ['bcSVD1', 'bcSVD2', 'oSVD'], "METHOD must be either 'bcSVD1', 'bcSVD2' or 'oSVD'"
+assert METHOD in ['bcSVD1', 'bcSVD2', 'SVD', 'nlr'], "METHOD must be either 'bcSVD1', 'bcSVD2', 'SVD', or 'nlr'"
+if DEBUG == True:
+    assert GENERATE_PERFUSION_MAPS == True, "DEBUG mode only applies when you are generating perfusion maps."
 # --------------------------------------------------------------------------
 
 # Determine the projection type based on the image type

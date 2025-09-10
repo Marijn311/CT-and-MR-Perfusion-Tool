@@ -1,152 +1,76 @@
-import ants
-import numpy as np
 import SimpleITK as sitk
+import numpy as np
+import ants
+from config import *
+from scipy.ndimage import gaussian_filter
 
-def load_image(path):
-    """ Reads a NIfTI file, reshape the volume(s) if required, and returns a list of 3D volumes plus their time indices for a 4d input.
-    Or return a 3D volume for a 3D input.
+
+def load_and_preprocess_raw_perf(perf_path, gaussian_sigma=0.5):
+    """ 
+    Load and preprocess raw 4D perfusion data from a NIfTI file.
+    Parameters:
+        - perf_path (str): Path to the .nii.gz perfusion image file. Expected input image shape is (t, z, y, x).
+        - gaussian_sigma (float): Standard deviation for Gaussian kernel used in smoothing.
+    Returns:
+        - volume_list (list): List of 3D numpy arrays, each representing a volume at a specific timepoint.
+        - time_index (list): List of time indices in seconds corresponding to each volume. 
     """
-    # Read the volumes using sitk
-    image = sitk.ReadImage(path)
+  
+    image = sitk.ReadImage(perf_path)
+    image = reorient_to_ras(image)
     image_array = sitk.GetArrayFromImage(image)
-    
-    if image_array.ndim == 4:
-    
-        image = reorient_to_ras(image)
-        image_array = sitk.GetArrayFromImage(image)
+    volumes = downsample_image(image_array) 
+    # volumes = motion_correction(volumes)
 
-        # First downsample the image if needed, this will speed up computation.
-        volumes = resize_images(image_array)  
+    # Convert the 4D array into a list of 3D arrays and corresponding time indices for easier processing
+    volume_list = []
+    time_index = []
+    for timepoint in range(volumes.shape[0]):
+        volume = volumes[timepoint, :, :, :]
+        volume_list.append(volume)
+        time_index.append(timepoint)
+    
+    # Smooth the input volumes to reduce noise and make results more stable
+    volume_list = [gaussian_filter(volume, sigma=gaussian_sigma) for volume in volume_list]
 
+    # Convert time index to seconds using the scan interval.
+    time_index = [i * SCAN_INTERVAL for i in time_index]
         
-        volumes = motion_correction(volumes)
-
-        img_list = []
-        time_index = []
-        nr_timepoints = volumes.shape[0]
-        for timepoint in range(nr_timepoints):
-            volume = volumes[timepoint, :, :, :]
-            img_list.append(volume)
-            time_index.append(timepoint)
-        return img_list, time_index
-    
-    if image_array.ndim == 3:
-
-        image = reorient_to_ras(image)
-        image_array = sitk.GetArrayFromImage(image)
-
-        # First downsample the image if needed, this will speed up computation.
-        volume = resize_images(image_array)
-
-        return volume
+    return volume_list, time_index
 
 
-
-def resize_images(image_array):
-    """Takes a 3D or 4D array and resamples the images to have smaller dimensions 
-    if some of the dimension exceed a given limit.
-
-    x and y limit are 250
-    z limit is 20
-    t limit is 50 (only for 4D images)
-    
-    Args:
-        nii_path: Path to the 3D or 4D NIfTI file
-      
+def load_and_preprocess_perf_map(perf_path):
+    """ 
+    Load and preprocess 3D perfusion maps (or brain mask) from a NIfTI file.
+    Parameters:
+        - perf_path (str): Path to the .nii.gz perfusion map file. Expected input image shape is (z, y, x).
+    Returns:
+        - volume (nd.array): 3D numpy array of the perfusion map (or brain mask)
     """
-    
-    if image_array.ndim == 4:
-        # Shape: (t, z, y, x)
-        t_size, z_size, y_size, x_size = image_array.shape
+    image = sitk.ReadImage(perf_path)
+    image = reorient_to_ras(image)
+    image_array = sitk.GetArrayFromImage(image)
+    volume = downsample_image(image_array)
 
-        # Define limits
-        t_limit, z_limit, y_limit, x_limit = 50, 20, 250, 250
-
-        # Calculate target sizes for t and z
-        new_t = min(t_size, t_limit)
-        new_z = min(z_size, z_limit)
-
-        # Calculate target sizes for x and y while maintaining aspect ratio
-        if x_size <= x_limit and y_size <= y_limit:
-            # Both within limits, no resizing needed
-            new_x = x_size
-            new_y = y_size
-        else:
-            # Calculate scale factors
-            x_scale = x_limit / x_size if x_size > x_limit else 1.0
-            y_scale = y_limit / y_size if y_size > y_limit else 1.0
-            
-            # Use the most restrictive scale factor to maintain aspect ratio
-            scale_factor = min(x_scale, y_scale)
-            
-            new_x = int(x_size * scale_factor)
-            new_y = int(y_size * scale_factor)
-
-        # Generate indices for each dimension
-        def generate_indices(original_size, target_size):
-            if target_size >= original_size:
-                return np.arange(original_size)
-            indices = np.linspace(0, original_size - 1, target_size, dtype=int)
-            return indices
-        
-        t_indices = generate_indices(t_size, new_t)
-        z_indices = generate_indices(z_size, new_z)
-        y_indices = generate_indices(y_size, new_y)
-        x_indices = generate_indices(x_size, new_x)
-        
-        # Use advanced indexing to sample the array
-        resampled_array = image_array[np.ix_(t_indices, z_indices, y_indices, x_indices)]
-        return resampled_array
-        
-    if image_array.ndim == 3:
-        # Shape: (z, y, x)
-        z_size, y_size, x_size = image_array.shape
-
-        # Define limits (no t dimension)
-        z_limit, y_limit, x_limit = 20, 250, 250
-
-        # Calculate target size for z
-        new_z = min(z_size, z_limit)
-        
-        # Calculate target sizes for x and y while maintaining aspect ratio
-        if x_size <= x_limit and y_size <= y_limit:
-            # Both within limits, no resizing needed
-            new_x = x_size
-            new_y = y_size
-        else:
-            # Calculate scale factors
-            x_scale = x_limit / x_size if x_size > x_limit else 1.0
-            y_scale = y_limit / y_size if y_size > y_limit else 1.0
-            
-            # Use the most restrictive scale factor to maintain aspect ratio
-            scale_factor = min(x_scale, y_scale)
-            
-            new_x = int(x_size * scale_factor)
-            new_y = int(y_size * scale_factor)
-        
-        # Generate indices for each dimension
-        def generate_indices(original_size, target_size):
-            if target_size >= original_size:
-                return np.arange(original_size)
-            indices = np.linspace(0, original_size - 1, target_size, dtype=int)
-            return indices
-        
-        z_indices = generate_indices(z_size, new_z)
-        y_indices = generate_indices(y_size, new_y)
-        x_indices = generate_indices(x_size, new_x)
-        
-        # Use advanced indexing to sample the array
-        resampled_array = image_array[np.ix_(z_indices, y_indices, x_indices)]
-        return resampled_array
+    return volume
 
 
 def reorient_to_ras(image):
+    """
+    Reorient an image to RAS (Right-Anterior-Superior) coordinate system.
+    Sets the direction matrix to identity for 3D or 4D images, ensuring
+    consistent orientation metadata without changing the actual image data.
+    When arrays are extracted from the image, they will all be in the same orientation.
+    
+    Parameters:
+        image: A SimpleITK image object (3D or 4D)
+    Returns:
+        SimpleITK image object with updated direction matrix
+    """
 
     array = sitk.GetArrayFromImage(image)
+    
     if array.ndim == 4:
-        # Simply set the direction matrix for the 4D image directly
-        # This doesn't change the actual data, just the orientation metadata.
-        # Such that the extracted arrays from the image will all be in the same orientation.
         image.SetDirection((1.0, 0.0, 0.0, 0.0,
                             0.0, 1.0, 0.0, 0.0,
                             0.0, 0.0, 1.0, 0.0,
@@ -156,25 +80,115 @@ def reorient_to_ras(image):
         image.SetDirection((1.0, 0.0, 0.0,
                             0.0, 1.0, 0.0,
                             0.0, 0.0, 1.0))
+        
     return image
 
 
+def downsample_image(image_array, t_limit=50, z_limit=20, y_limit=250, x_limit=250):
+    """
+    Downsample a 3D or 4D image array to reduce dimensions if they exceed specified limits.
+    For spatial dimensions (x, y), maintains aspect ratio when downsampling. For temporal 
+    and z dimensions, applies direct size limits. 
+    We opt for downsampling instead of interpolation to significantly reduce computation time.
+    
+    Parameters:
+        image_array (numpy.ndarray): 3D or 4D image array to downsample (z, y, x) or (t, z, y, x)
+        t_limit (int, optional): Maximum time dimension size.
+        z_limit (int, optional): Maximum z dimension size.
+        y_limit (int, optional): Maximum y dimension size.
+        x_limit (int, optional): Maximum x dimension size.
+    Returns:
+        numpy.ndarray: Downsampled image array with reduced dimensions
+    """
 
-def motion_correction(image_4d):
-    # Convert numpy array to ANTs images
+    def generate_indices(original_size, target_size):
+        """Generate evenly spaced indices to downsample an array dimension"""
+        if target_size >= original_size:
+            return np.arange(original_size)
+        indices = np.linspace(0, original_size - 1, target_size, dtype=int)
+        return indices
+    
+    def calculate_spatial_dims(x_size, y_size, x_limit, y_limit):
+        """Calculate new x and y dimensions while maintaining aspect ratio"""
+        if x_size <= x_limit and y_size <= y_limit:
+            return x_size, y_size
+        
+        x_scale = x_limit / x_size if x_size > x_limit else 1.0
+        y_scale = y_limit / y_size if y_size > y_limit else 1.0
+        scale_factor = min(x_scale, y_scale)
+        
+        return int(x_size * scale_factor), int(y_size * scale_factor)
+    
+    if image_array.ndim == 4:
+        
+        t_size, z_size, y_size, x_size = image_array.shape
+        new_t = min(t_size, t_limit) # Limit time dimension in case the the time dimension exceeds the limit
+        new_z = min(z_size, z_limit) # Limit z dimension in case the the z dimension exceeds the limit
+        new_x, new_y = calculate_spatial_dims(x_size, y_size, x_limit, y_limit) # If either x or y dimension exceeds the limit, limit both dimensions in the same way to maintain aspect ratio
+
+        # Generate indices for each dimension, the indices are evenly spaced over the original dimension
+        indices = [
+            generate_indices(t_size, new_t),
+            generate_indices(z_size, new_z),
+            generate_indices(y_size, new_y),
+            generate_indices(x_size, new_x)
+        ]
+
+        # Downsample the image by keeping only the voxels at the generated indices
+        downsampled_image = image_array[np.ix_(*indices)]
+        
+        return downsampled_image
+
+    if image_array.ndim == 3:
+    
+        z_size, y_size, x_size = image_array.shape
+        
+        new_z = min(z_size, z_limit) # Limit z dimension in case the the z dimension exceeds the limit
+        new_x, new_y = calculate_spatial_dims(x_size, y_size, x_limit, y_limit) # If either x or y dimension exceeds the limit, limit both dimensions in the same way to maintain aspect ratio
+        
+        # Generate indices for each dimension, the indices are evenly spaced over the original dimension
+        indices = [
+            generate_indices(z_size, new_z),
+            generate_indices(y_size, new_y),
+            generate_indices(x_size, new_x)
+        ]
+        
+        # Downsample the image by keeping only the voxels at the generated indices
+        downsampled_image = image_array[np.ix_(*indices)]
+        
+        return downsampled_image
+
+
+def motion_correction(image_array, type_of_transform='QuickRigid'):
+    """
+    Perform motion correction on a 4D image array by registering all 3D volumes to the first 3D volume.
+    Registration is done using ANTsPy with the specified transformation type.
+    
+    Parameters:
+        image_array (numpy.ndarray): 4D numpy array with shape (t, z, y, x)
+                                   representing the image sequence to be motion corrected
+        type_of_transform (str, optional): Type of transformation for registration. 
+                                         Defaults to 'QuickRigid'.
+    Returns:
+        numpy.ndarray: Motion-corrected 4D numpy array with the same shape as input,
+                      where all volumes are aligned to the first volume as reference
+    """
+    
+    # Convert the 4D numpy array a list of 3D ANTs images
     ants_images = []
-    for t in range(image_4d.shape[0]):
-        volume = image_4d[t, :, :, :]
+    for t in range(image_array.shape[0]):
+        volume = image_array[t, :, :, :]
         ants_img = ants.from_numpy(volume)
         ants_images.append(ants_img)
     
     # Use first volume as reference
     reference = ants_images[0]
     
-    # Align all volumes to the reference
+    # Align all other volumes to the reference
     aligned_volumes = []
-    aligned_volumes.append(ants_images[0])  # First volume doesn't need alignment
+    aligned_volumes.append(ants_images[0])  # The first volume is already aligned to itself
     
+    # Apply motion correction to all subsequent volumes
     for t in range(1, len(ants_images)):
         print(f"Motion correcting volume {t+1}/{len(ants_images)}")
         moving = ants_images[t]
@@ -183,16 +197,16 @@ def motion_correction(image_4d):
         registration = ants.registration(
             fixed=reference,
             moving=moving,
-            type_of_transform='QuickRigid'
+            type_of_transform=type_of_transform
         )
         
         # Apply transformation to get aligned volume
         aligned_volume = registration['warpedmovout']
         aligned_volumes.append(aligned_volume)
     
-    # Convert back to numpy array
-    corrected_array = np.zeros_like(image_4d)
+    # Convert list of aligned 3D ANTs images back to a 4D numpy array
+    motion_corrected_array = np.zeros_like(image_array)
     for t, aligned_vol in enumerate(aligned_volumes):
-        corrected_array[t, :, :, :] = aligned_vol.numpy()
+        motion_corrected_array[t, :, :, :] = aligned_vol.numpy()
     
-    return corrected_array
+    return motion_corrected_array
