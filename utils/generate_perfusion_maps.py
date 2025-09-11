@@ -2,7 +2,7 @@ import numpy as np
 from config import *
 from scipy.linalg import toeplitz
 from utils.determine_aif import gamma_variate
-from utils.boxNLR import NLR
+from utils.boxNLR import boxNLR
 
 
 def extract_ctc(volume_list, mask, bolus_threshold=0.01):
@@ -150,20 +150,21 @@ def generate_ttp(ctc_volumes, time_index, s0_index, mask, outside_value=-1):
 
 
 
-def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, SVD_truncation_threshold=0.1, outside_value=-1, rho=1.05, hcf=0.73):
+def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, method='SVD', SVD_truncation_threshold=0.1, oSVD_OI_threshold=0.035, outside_value=-1, rho=1.05, hcf=0.73):
     """
     Generate perfusion maps (MTT, CBV, CBF, Tmax) from contrast time curves (CTC) via deconvolution with the arterial input function (AIF).
     This function supports multiple SVD-based deconvolution methods.
     Additionally, there is the option to use the box-shaped model with non-linear regression optimization,
     as described in Bennink et al. (2004) (https://doi.org/10.1117/1.JMI.3.2.026003). Though this method is still a work in progress.
-    The method can be set via the METHOD parameter in config.py.
 
     Parameters: 
         - ctc_volumes (list): List of 3D nd.arrays (z,y,x) representing contrast time curves.
         - time_index (list): list of time indexes corresponding to the ctc_volumes.
         - mask (nd.array): 3D binary brain mask (z,y,x).
         - aif_properties (nd.array): 1D array with 4 elements representing the parameters of the fitted gamma variate function for the AIF.
+        - method (str, optional): Which deconvolution method to use, either 'bcSVD1', 'bcSVD2', 'SVD', 'oSVD', or 'boxNLR' (default: 'SVD')
         - SVD_truncation_threshold (float, optional): threshold for svd regularization as fraction of maximum singular value (default: 0.1)
+        - oSVD_OI_threshold (float, optional): threshold for oscillation index in oSVD method (default: 0.035)
         - outside_value (float, optional): Value assigned to voxels outside the brain mask (default: -1)
         - rho (float, optional): Tissue density in g/ml (default: 1.05 g/ml)
         - hcf (float, optional): Hematocrit correction factor (default: 0.73)
@@ -173,6 +174,9 @@ def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, SVD_t
         - cbf (nd.array): 3D array (z,y,x) containing the Cerebral Blood Flow in ml/100g/min
         - tmax (nd.array): 3D array (z,y,x) containing the Time to maximum of residue function in seconds
     """
+        
+    if method not in ['SVD', 'bcSVD1', 'bcSVD2', 'oSVD', 'boxNLR']:
+        raise ValueError("Invalid method. Choose either 'SVD', 'bcSVD1', 'bcSVD2', 'oSVD', or 'boxNLR'.")
 
     # Generate AIF with the gamma variate function and the provided parameters
     aif = gamma_variate(time_index, *aif_properties)
@@ -184,12 +188,12 @@ def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, SVD_t
     nr_timepoints = len(time_index)  
 
     # Construct convolution matrix G based on selected deconvolution method
-    if METHOD == 'SVD':
+    if method == 'SVD':
         # Original SVD method using standard Toeplitz matrix
         G = toeplitz(aif, np.zeros(nr_timepoints))
         ctc_volumes_pad = ctc_volumes
 
-    if METHOD == 'bcSVD1':
+    if method == 'bcSVD1':
         # Block-circulant SVD method 1 with Simpson's rule integration
         colG = np.zeros(2 * nr_timepoints)
         colG[0] = aif[0]
@@ -214,7 +218,7 @@ def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, SVD_t
         # Pad contrast data by doubling temporal dimension
         ctc_volumes_pad = np.pad(ctc_volumes, [(0, len(ctc_volumes)),] + [(0, 0)] * 3)
    
-    if METHOD == 'bcSVD2':
+    if method == 'bcSVD2':
         # Block-circulant SVD method 2 with manual matrix construction
         cmat = np.zeros([nr_timepoints, nr_timepoints])
         B = np.zeros([nr_timepoints, nr_timepoints])
@@ -235,8 +239,38 @@ def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, SVD_t
         # Pad contrast data by doubling temporal dimension
         ctc_volumes_pad = np.pad(ctc_volumes, [(0, len(ctc_volumes)),] + [(0, 0)] * 3)
     
-    if METHOD == 'nlr':
-        mtt, cbv, cbf, tmax = NLR(ctc_volumes, aif, deltaT, mask, outside_value=-1)
+    if method == 'oSVD':
+        # Oscillation index SVD method with adaptive regularization
+        # Uses block-circulant matrix construction similar to bcSVD1
+        colG = np.zeros(2 * nr_timepoints)
+        colG[0] = aif[0]
+        
+        # Apply Simpson's rule for numerical integration at boundaries
+        colG[nr_timepoints - 1] = (aif[nr_timepoints - 2] + 4 * aif[nr_timepoints - 1]) / 6
+        colG[nr_timepoints] = aif[nr_timepoints - 1] / 6
+        
+        # Apply Simpson's rule for interior points
+        for k in range(1, nr_timepoints - 1):
+            colG[k] = (aif[k - 1] + 4 * aif[k] + aif[k + 1]) / 6
+
+        # Construct row vector for circulant matrix
+        rowG = np.zeros(2 * nr_timepoints)
+        rowG[0] = colG[0]
+        for k in range(1, 2 * nr_timepoints):
+            rowG[k] = colG[2 * nr_timepoints - k]
+
+        # Create block-circulant matrix
+        G = toeplitz(colG, rowG)
+   
+        # Pad contrast data by doubling temporal dimension
+        ctc_volumes_pad = np.pad(ctc_volumes, [(0, len(ctc_volumes)),] + [(0, 0)] * 3)
+        
+        # Use oSVD-specific processing instead of standard SVD approach
+        mtt, cbv, cbf, tmax = oSVD(ctc_volumes_pad, G, deltaT, mask, oSVD_OI_threshold, nr_timepoints, outside_value, rho, hcf, time_index)
+        return mtt, cbv, cbf, tmax
+
+    if method == 'boxNLR':
+        mtt, cbv, cbf, tmax = boxNLR(ctc_volumes, aif, deltaT, mask, outside_value=-1)
         return mtt, cbv, cbf, tmax
 
 
@@ -251,23 +285,23 @@ def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, SVD_t
     # Reconstruct pseudo-inverse matrix using filtered singular values
     Ginv = V.T @ np.diag(filteredS) @ U.T
     
-    # Perform deconvolution to obtain residue function k
-    k = np.abs(np.einsum('ab, bcde->acde', Ginv, ctc_volumes_pad))
+    # Perform deconvolution to obtain residue function R
+    R = np.abs(np.einsum('ab, bcde->acde', Ginv, ctc_volumes_pad))
     
     # Truncate residue function to original temporal length
-    k = k[:nr_timepoints] 
+    R = R[:nr_timepoints] 
     
     # Calculate perfusion parameters from residue function
     # CBF: Maximum of residue function scaled by physiological constants (ml/100g/min)
-    cbf = hcf / rho * k.max(axis=0) * 60 * 100
+    cbf = hcf / rho * R.max(axis=0) * 60 * 100
     # CBV: Area under residue function scaled by physiological constants (ml/100g)
-    cbv = hcf / rho * k.sum(axis=0) * 100
+    cbv = hcf / rho * R.sum(axis=0) * 100
     # MTT: Mean transit time calculated as CBV/CBF ratio (seconds)
     mtt = np.divide(cbv, cbf, out=np.zeros_like(cbv), where=cbf!=0) * 60
 
     # Calculate time to maximum of residue function (tmax)
     time_index = np.array(time_index, dtype=int) 
-    tmax = time_index[k.argmax(axis=0)]
+    tmax = time_index[R.argmax(axis=0)]
     tmax = tmax.astype(np.float64)
     
     # Apply brain mask to set outside values for all perfusion maps
@@ -279,8 +313,116 @@ def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, SVD_t
     return mtt, cbv, cbf, tmax
 
 
-
-
-
-
+def oSVD(ctc_volumes_pad, G, deltaT, mask, oSVD_OI_threshold, nr_timepoints, outside_value, rho, hcf, time_index):
+    """
+    Helper function to generate perfusion maps using the oSVD method.
     
+    This function implements the oscillation index SVD method which adaptively selects
+    the optimal SVD truncation threshold for each voxel based on minimizing oscillations
+    in the residue function.
+    
+    Parameters:
+        - ctc_volumes_pad (np.array): 4D array of padded contrast time curves
+        - G (np.array): Block-circulant convolution matrix 
+        - deltaT (float): Time step for numerical integration
+        - mask (np.array): 3D binary brain mask
+        - oSVD_OI_threshold (float): Oscillation index threshold
+        - nr_timepoints (int): Number of original timepoints
+        - outside_value (float): Value for voxels outside mask
+        - rho (float): Tissue density
+        - hcf (float): Hematocrit correction factor
+        - time_index (list): Time indices
+        
+    Returns:
+        - mtt, cbv, cbf, tmax: Perfusion parameter maps
+    """
+    
+    # Perform SVD decomposition on scaled convolution matrix
+    U, S, V = np.linalg.svd(G * deltaT)
+    
+    # Initialize output arrays
+    z, y, x = mask.shape
+    cbf = np.zeros((z, y, x))
+    cbv = np.zeros((z, y, x))
+    mtt = np.zeros((z, y, x))
+    tmax = np.zeros((z, y, x))
+    
+    # Process each voxel individually for adaptive threshold selection
+    pixel_count = 0
+    total_pixels = np.sum(mask)
+    
+    for zi in range(z):
+        for yi in range(y):
+            for xi in range(x):
+                if mask[zi, yi, xi]:
+                    pixel_count += 1
+                    
+                    # Print progress every 1000 pixels
+                    if pixel_count % 1000 == 0:
+                        percentage = (pixel_count / total_pixels) * 100
+                        print(f"Processing pixel {pixel_count}/{total_pixels} ({percentage:.1f}%)")
+                    
+                    # Extract concentration time curve for current voxel
+                    vett_conc = ctc_volumes_pad[:, zi, yi, xi]
+                    
+                    # Find optimal threshold using oscillation index
+                    best_residue = None
+                    
+                    # Test thresholds from 5% to 95% of maximum singular value
+                    for threshold_percent in range(5, 100, 5):
+                        threshold = (threshold_percent / 100.0) * S[0]
+                        
+                        # Create filtered inverse matrix
+                        filtered_S = 1.0 / (S + 1e-5)
+                        filtered_S[S < threshold] = 0
+                        G_inv = V.T @ np.diag(filtered_S) @ U.T
+                        
+                        # Calculate residue function
+                        residue = G_inv @ vett_conc
+                        residue = np.abs(residue)
+                        
+                        # Calculate oscillation index
+                        oscillation = 0.0
+                        L = len(residue)
+                        for j in range(2, L):
+                            oscillation += abs(residue[j] - 2*residue[j-1] + residue[j-2])
+                        
+                        max_residue = np.max(residue)
+                        if max_residue > 0:
+                            OI = (1.0 / L) * (1.0 / max_residue) * oscillation
+                        else:
+                            OI = float('inf')
+                        
+                        # Use this threshold if oscillation index is below threshold
+                        if OI < oSVD_OI_threshold:
+                            best_residue = residue
+                            break
+                    
+                    # If no threshold met criteria, use the most restrictive one
+                    if best_residue is None:
+                        threshold = 0.95 * S[0]
+                        filtered_S = 1.0 / (S + 1e-5)
+                        filtered_S[S < threshold] = 0
+                        G_inv = V.T @ np.diag(filtered_S) @ U.T
+                        best_residue = np.abs(G_inv @ vett_conc)
+                    
+                    # Truncate residue function to original temporal length
+                    residue_truncated = best_residue[:nr_timepoints]
+                    
+                    # Calculate perfusion parameters for this voxel
+                    cbf[zi, yi, xi] = hcf / rho * np.max(residue_truncated) * 60 * 100
+                    cbv[zi, yi, xi] = hcf / rho * np.sum(residue_truncated) * 100
+                    if cbf[zi, yi, xi] != 0:
+                        mtt[zi, yi, xi] = (cbv[zi, yi, xi] / cbf[zi, yi, xi]) * 60
+                    
+                    # Calculate time to maximum
+                    time_index_array = np.array(time_index[:nr_timepoints], dtype=int)
+                    tmax[zi, yi, xi] = float(time_index_array[np.argmax(residue_truncated)])
+    
+    # Apply brain mask to set outside values
+    tmax[mask == 0] = outside_value
+    cbv[mask == 0] = outside_value
+    cbf[mask == 0] = outside_value
+    mtt[mask == 0] = outside_value
+    
+    return mtt, cbv, cbf, tmax

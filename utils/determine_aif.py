@@ -80,7 +80,7 @@ def majority(array, ignore=None):
         return labels[np.argmax(counts)]
 
 
-def determine_aif(ctc_volumes, time_index, brain_mask, ttp, dilate_radius=5, erode_radius=2,
+def determine_aif(ctc_volumes, time_index, mask, ttp, dilate_radius=5, erode_radius=2,
             max_vol_thres=50, min_vol_thres=5, smoothness_threshold=0.04):
     """
     Identify the Arterial Input Function (AIF) from the contrast time curves (CTC).
@@ -92,7 +92,7 @@ def determine_aif(ctc_volumes, time_index, brain_mask, ttp, dilate_radius=5, ero
     Parameters:
         - ctc_volumes (list): List of 3D nd.arrays (z,y,x) representing contrast time curves (CTC).
         - time_index (list): List of time indices corresponding to the CTC data.
-        - brain_mask (nd.array): 3D binary nd.array (z,y,x) brain mask.
+        - mask (nd.array): 3D binary nd.array (z,y,x) brain mask.
         - ttp (nd.array): 3D nd.array (z,y,x) time-to-peak values for each voxel.
         - dilate_radius (int, optional): Radius for dilation operation during morphological filtering. Defaults to 5.
         - erode_radius (int, optional): Radius for erosion operation during morphological filtering. Defaults to 2.
@@ -110,15 +110,16 @@ def determine_aif(ctc_volumes, time_index, brain_mask, ttp, dilate_radius=5, ero
     # Due to slight patient motion or sub-optimal masking, skull signal can be inside the mask near the mask's edges. 
     # We want to prevent the skull from being selected as AIF
     # Hence we erode the brain mask with a 2D kernel
-    kernel = np.ones((1, 15, 15), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
-    brain_mask = binary_erosion(brain_mask, kernel)
+    kernel_size = mask.shape[2] // 15
+    kernel = np.ones((1, kernel_size, kernel_size), dtype=bool)  # x,x kernel in x-y plane, no erosion in z, since the number of slices is very low compared to in-plane resolution
+    mask = binary_erosion(mask, kernel)
 
     # Convert the list of 3D arrays to a 4D array
     ctc_volumes = np.stack(ctc_volumes, axis=0)
 
     # Get AUC and TTP distributions
-    auc_values = ctc_volumes.sum(0)[brain_mask > 0]
-    ttp_values = ttp[brain_mask > 0]
+    auc_values = ctc_volumes.sum(0)[mask > 0]
+    ttp_values = ttp[mask > 0]
 
     # Adaptive thresholding approach
     # Set the TTP and AUC thresholds based on the TTP and AUC distributions, as a percentage of the distribution
@@ -128,7 +129,7 @@ def determine_aif(ctc_volumes, time_index, brain_mask, ttp, dilate_radius=5, ero
     # Try to find an AIF with the thresholds for AUC and TTP. If it fails, try the next set of thresholds. Thresholds are progressively relaxed.
     for attempt_ttp, attempt_auc in attempts:
         # Identify initial AIF candidates based on AUC and TTP thresholds.
-        aif_candidate = (ctc_volumes.sum(0) * brain_mask > attempt_auc) * (ttp < attempt_ttp) * (ttp > 0)
+        aif_candidate = (ctc_volumes.sum(0) * mask > attempt_auc) * (ttp < attempt_ttp) * (ttp > 0)
 
         # Apply morphological operations (dilation followed by erosion) to refine AIF candidates
         aif_candidate = binary_erosion(

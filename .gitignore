@@ -1,7 +1,6 @@
 __pycache__
 *.pyc
-*.h5
+*.xlsx 
 /dev
-/demo_data*
-
+/demo_data_*
 

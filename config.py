@@ -1,23 +1,24 @@
 
-DATASET_PATH = r"demo_data_isles24"      # Path to the dataset directory containing CTP scans
+DATASET_PATH = r"demo_data_isles24"         # Path to the dataset directory containing CTP scans
+IMAGE_TYPE = 'ctp'                          # Either 'mrp' or 'ctp'
 SCAN_INTERVAL = 2.0                         # Time between two 3D consecutive volumes in seconds
 ECHO_TIME = 0.03                            # Echo time in seconds (only for MRP)
-IMAGE_TYPE = 'ctp'                          # Either 'mrp' or 'ctp'
-METHOD = 'SVD'                             # Which deconvolution method to use, either 'bcSVD1', 'bcSVD2', 'SVD', or 'nlr'
-DEBUG = True                               # if True, shows plots during processing to visualize intermediate results
-GENERATE_PERFUSION_MAPS = True          # If True, generates perfusion maps from the inputted perfusion data
-SHOW_COMPARISONS = True                    # If True, shows comparison plots between generated and reference perfusion maps
-CALCULATE_METRICS = True                 # If True, calculates similarity metrics between generated and reference perfusion maps
+
+#--------------------------------------------------------------------------
+
+DEBUG = True                                # if True, shows plots during processing to visualize intermediate results
+GENERATE_PERFUSION_MAPS = True              # If True, generates perfusion maps from the inputted perfusion data
+SHOW_COMPARISONS = True                     # If True, shows comparison plots between generated and reference perfusion maps
+CALCULATE_METRICS = True                    # If True, calculates similarity metrics between generated and reference perfusion maps
 
 # --------------------------------------------------------------------------
+
 assert IMAGE_TYPE in ['ctp', 'mrp'], "IMAGE_TYPE must be either 'ctp' or 'mrp'"
-assert METHOD in ['bcSVD1', 'bcSVD2', 'SVD', 'nlr'], "METHOD must be either 'bcSVD1', 'bcSVD2', 'SVD', or 'nlr'"
 if DEBUG == True:
     assert GENERATE_PERFUSION_MAPS == True, "DEBUG mode only applies when you are generating perfusion maps."
-# --------------------------------------------------------------------------
-
-# Determine the projection type based on the image type
 if IMAGE_TYPE == 'ctp':
     PROJECTION = 'max'
 elif IMAGE_TYPE == 'mrp':
     PROJECTION = 'min'
+# --------------------------------------------------------------------------
+
