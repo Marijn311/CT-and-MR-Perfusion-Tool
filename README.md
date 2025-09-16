@@ -2,8 +2,7 @@
   <img src="logo_wobble.gif" width="600">
 </div>
 
-
-
+# PyPeT: an open Python Perfusion Tool
 
 ## Introduction
 
