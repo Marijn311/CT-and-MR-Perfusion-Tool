@@ -12,6 +12,10 @@ Unlike many commercial tools, PyPeT is free, transparent, and designed with modu
 
 For a detailed description of the pipeline and the validation experiments, please read the attached technical report.
 
+<div align="center">
+  <img src="output_comparison.gif" width="800">
+</div>
+
 ## Key Features
 - **Open and extensible**: Python implementation with clear structure, strong modularity, and extensive documentation  
 - **Low computational requirements**: Runs in seconds on a standard laptop, no GPU needed  
@@ -23,9 +27,6 @@ For a detailed description of the pipeline and the validation experiments, pleas
 ## Cite
 Borghouts M, Su R. *PyPeT: A Python Perfusion Tool for Automated Quantitative Brain CT and MR Perfusion Analysis*. Eindhoven University of Technology. [insert arXiv DOI]
 
-<div align="center">
-  <img src="output_comparison.gif" width="600">
-</div>
 
 
 ## SETUP:
