@@ -1,6 +1,9 @@
 <div align="center">
-  <img src="icon.png" alt="Icon" width="300"/>
+  <img src="docs/logo_wobble.gif" width="600">
 </div>
+
+
+
 
 ## Introduction
 
