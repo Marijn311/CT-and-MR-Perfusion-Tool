@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/logo_wobble.gif" width="600">
+  <img src="docs/logo_wobble.gif" width="300">
 </div>
 
 
