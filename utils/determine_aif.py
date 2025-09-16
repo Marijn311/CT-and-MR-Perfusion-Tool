@@ -94,12 +94,12 @@ def determine_aif(ctc_volumes, time_index, mask, ttp, dilate_radius=5, erode_rad
         - time_index (list): List of time indices corresponding to the CTC data.
         - mask (nd.array): 3D binary nd.array (z,y,x) brain mask.
         - ttp (nd.array): 3D nd.array (z,y,x) time-to-peak values for each voxel.
-        - dilate_radius (int, optional): Radius for dilation operation during morphological filtering. Defaults to 5.
-        - erode_radius (int, optional): Radius for erosion operation during morphological filtering. Defaults to 2.
-        - max_vol_thres (float, optional): Maximum volume threshold for AIF candidates. Defaults to 50.
-        - min_vol_thres (float, optional): Minimum volume threshold for AIF candidates. Defaults to 5.
+        - dilate_radius (int, optional): Radius for dilation operation during morphological filtering.
+        - erode_radius (int, optional): Radius for erosion operation during morphological filtering. 
+        - max_vol_thres (float, optional): Maximum volume threshold for AIF candidates.
+        - min_vol_thres (float, optional): Minimum volume threshold for AIF candidates. 
         - smoothness_threshold (float, optional): Maximum allowed smoothness metric for AIF candidates.
-                        Candidates with higher values (less smooth) will be rejected. Defaults to 0.04.
+                        Candidates with higher values (less smooth) will be rejected. 
 
     Returns:
         - aif_properties (nd.array): 1D array storing the parameters of the best-fit gamma variate function for the AIF.
@@ -128,87 +128,90 @@ def determine_aif(ctc_volumes, time_index, mask, ttp, dilate_radius=5, erode_rad
 
     # Try to find an AIF with the thresholds for AUC and TTP. If it fails, try the next set of thresholds. Thresholds are progressively relaxed.
     for attempt_ttp, attempt_auc in attempts:
-        # Identify initial AIF candidates based on AUC and TTP thresholds.
-        aif_candidate = (ctc_volumes.sum(0) * mask > attempt_auc) * (ttp < attempt_ttp) * (ttp > 0)
-
-        # Apply morphological operations (dilation followed by erosion) to refine AIF candidates
-        aif_candidate = binary_erosion(
-            binary_dilation(aif_candidate, np.ones([1, dilate_radius, dilate_radius], bool)), 
-            np.ones([1, erode_radius, erode_radius], bool)
-        )
-
-        # Perform connected component analysis to separate individual AIF candidates
-        aif_candidate, nr_components = cc3d.connected_components(aif_candidate, return_N=True)
-
-        # Skip to next attempt (with more relaxed thresholds) if no components found
-        if nr_components == 0:
-            continue
-
-        # Initialize a list to store properties of AIF candidates
-        cands = []
-
-        # Iterate through each connected component (candidate region)
-        for idx in range(1, nr_components + 1):
-            curve_candidates = aif_candidate == idx  # Extract the current candidate region
-            vol = curve_candidates.sum()  # Calculate the volume of the candidate region
-            curve = ctc_volumes[:, curve_candidates]  # Extract the CTC data for the candidate region
-            curve_mean = curve.mean(axis=1)  # Compute the mean CTC curve for the candidate region
-            peak_difference = np.max(curve_mean) - np.mean(curve_mean[-3:])  # Difference between peak and end values of the curve
-
-            # Skip candidates that are too large or too small
-            if vol > max_vol_thres or vol < min_vol_thres:
-                continue
-
-            # Calculate signal smoothness
-            smoothness = calculate_signal_smoothness(curve_mean)
-            
-            # Skip candidates that are not smooth enough (lower smoothness score means more smooth)
-            if smoothness > smoothness_threshold:
-                continue
-
-            try:
-                # Fit a gamma variate function to the mean CTC curve of the candidate region
-                aif_properties = fit_gamma_variate(time_index, curve_mean)
-            except:
-                # If fitting fails, skip this candidate
-                continue
-
-            # Calculate the fitting error for the candidate region
-            fitting_error = np.sqrt(np.sum((curve - gamma_variate(time_index, *aif_properties)[:, np.newaxis]) ** 2, axis=1))
-
-            # Append candidate properties to the list
-            cands.append({
-                'idx': idx,
-                'vol': vol,
-                'aif_properties': aif_properties,
-                'mean_error': fitting_error.mean(),
-                'max_error': fitting_error.max(),
-                'peak_difference': peak_difference,
-                'smoothness': smoothness
-            })
-
-        # Convert the list of candidate properties to a DataFrame
-        cands = pd.DataFrame(cands)
+        # Try different smoothness thresholds if no candidates found
+        smoothness_attempts = [smoothness_threshold, smoothness_threshold * 2, smoothness_threshold * 5, smoothness_threshold * 10]
         
-        # If we found valid candidates, proceed with selection
-        if not cands.empty:
-            # Compute a score for each candidate based on volume, peak-end difference, and mean error
-            cands['score'] = cands.vol * cands.peak_difference / cands.mean_error
+        for current_smoothness_threshold in smoothness_attempts:
+            # Identify initial AIF candidates based on AUC and TTP thresholds.
+            aif_candidate = (ctc_volumes.sum(0) * mask > attempt_auc) * (ttp < attempt_ttp) * (ttp > 0)
 
-            # Select the candidate with the highest score
-            bestCand = np.argmax(cands.score)
+            # Apply morphological operations (dilation followed by erosion) to refine AIF candidates
+            aif_candidate = binary_erosion(
+                binary_dilation(aif_candidate, np.ones([1, dilate_radius, dilate_radius], bool)), 
+                np.ones([1, erode_radius, erode_radius], bool)
+            )
 
-            # Extract characteristics of the best candidate
-            aifSegIdx = cands.iloc[bestCand].idx  # Index of the best candidate
-            aif_properties = cands.iloc[bestCand].aif_properties  # Propperties of the best-fit gamma variate function for the best candidate
-            cands.loc[:, 'chosen'] = 0
-            cands.loc[bestCand, 'chosen'] = 1  # Mark the selected candidate
+            # Perform connected component analysis to separate individual AIF candidates
+            aif_candidate, nr_components = cc3d.connected_components(aif_candidate, return_N=True)
 
-            # Make a binary mask of the selected AIF region
-            aif_mask = aif_candidate == aifSegIdx
+            # Skip to next attempt (with more relaxed thresholds) if no components found
+            if nr_components == 0:
+                continue
 
-            return aif_properties, aif_mask
+            # Initialize a list to store properties of AIF candidates
+            cands = []
+
+            # Iterate through each connected component (candidate region)
+            for idx in range(1, nr_components + 1):
+                curve_candidates = aif_candidate == idx  # Extract the current candidate region
+                vol = curve_candidates.sum()  # Calculate the volume of the candidate region
+                curve = ctc_volumes[:, curve_candidates]  # Extract the CTC data for the candidate region
+                curve_mean = curve.mean(axis=1)  # Compute the mean CTC curve for the candidate region
+                peak_difference = np.max(curve_mean) - np.mean(curve_mean[-3:])  # Difference between peak and end values of the curve
+
+                # Skip candidates that are too large or too small
+                if vol > max_vol_thres or vol < min_vol_thres:
+                    continue
+
+                # Calculate signal smoothness
+                smoothness = calculate_signal_smoothness(curve_mean)
+                
+                # Skip candidates that are not smooth enough (lower smoothness score means more smooth)
+                if smoothness > current_smoothness_threshold:
+                    continue
+
+                try:
+                    # Fit a gamma variate function to the mean CTC curve of the candidate region
+                    aif_properties = fit_gamma_variate(time_index, curve_mean)
+                except:
+                    # If fitting fails, skip this candidate
+                    continue
+
+                # Calculate the fitting error for the candidate region
+                fitting_error = np.sqrt(np.sum((curve - gamma_variate(time_index, *aif_properties)[:, np.newaxis]) ** 2, axis=1))
+
+                # Append candidate properties to the list
+                cands.append({
+                    'idx': idx,
+                    'vol': vol,
+                    'aif_properties': aif_properties,
+                    'mean_error': fitting_error.mean(),
+                    'max_error': fitting_error.max(),
+                    'peak_difference': peak_difference,
+                    'smoothness': smoothness
+                })
+
+            # Convert the list of candidate properties to a DataFrame
+            cands = pd.DataFrame(cands)
+            
+            # If we found valid candidates, proceed with selection
+            if not cands.empty:
+                # Compute a score for each candidate based on volume, peak-end difference, and mean error
+                cands['score'] = cands.vol * cands.peak_difference / cands.mean_error
+
+                # Select the candidate with the highest score
+                bestCand = np.argmax(cands.score)
+
+                # Extract characteristics of the best candidate
+                aifSegIdx = cands.iloc[bestCand].idx  # Index of the best candidate
+                aif_properties = cands.iloc[bestCand].aif_properties  # Propperties of the best-fit gamma variate function for the best candidate
+                cands.loc[:, 'chosen'] = 0
+                cands.loc[bestCand, 'chosen'] = 1  # Mark the selected candidate
+
+                # Make a binary mask of the selected AIF region
+                aif_mask = aif_candidate == aifSegIdx
+
+                return aif_properties, aif_mask
 
     # If no candidates found after all attempts
-    raise ValueError("No AIF candidates found after adaptive thresholding attempts.")
-
+    raise ValueError("No AIF candidates found after adaptive thresholding attempts., try relaxing the thresholds further by changing the parameters `max_vol_thres`, `min_vol_thres`, or `smoothness_threshold`.")

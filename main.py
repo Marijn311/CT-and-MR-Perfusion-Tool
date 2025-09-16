@@ -13,7 +13,7 @@ Smaller adjustments such as thresholds and kernel sizes can be adjusted in the r
 PyPeT assumes a specific directory structure for the dataset. The required structure is described in the README file.
 """
 
-print("\nStarting CTP processing...")
+print("\nStarted processing...")
 
 # Store similarity metrics for every scan in the dataset that was compared to a reference map
 all_metrics = []
@@ -60,6 +60,6 @@ for root, dirs, files in os.walk(DATASET_PATH):
     if CALCULATE_METRICS:
         average_metrics_on_dataset(all_metrics)
     
-    print("\nFinished Processing CTP data!")
+    print("\nFinished Processing!")
     break
 

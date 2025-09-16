@@ -18,8 +18,8 @@ def view_aif(time_index, ctc_volumes, aif_properties, aif_mask, mask, vmin=0, vm
         - aif_properties (nd.array): 1D array with 4 elements representing parameters for fitted gamma variate function (t0, alpha, beta, amplitude)
         - aif_mask (nd.array):  3D binary mask (z,y,x) indicating the selected AIF voxels
         - mask (nd.array): 3D binary brain mask
-        - vmin (float, default=0): Lower percentile for contrast scaling
-        - vmax (float, default=100): Upper percentile for contrast scaling
+        - vmin (float, optional): Lower percentile for contrast scaling
+        - vmax (float, optional): Upper percentile for contrast scaling
         
     Controls:
         - Mouse wheel: Navigate through time points

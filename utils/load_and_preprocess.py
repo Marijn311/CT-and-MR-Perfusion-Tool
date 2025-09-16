@@ -5,7 +5,7 @@ from config import *
 from scipy.ndimage import gaussian_filter
 
 
-def load_and_preprocess_raw_perf(perf_path, gaussian_sigma=0.5):
+def load_and_preprocess_raw_perf(perf_path, gaussian_sigma=1):
     """ 
     Load and preprocess raw 4D perfusion data from a NIfTI file.
     Parameters:
@@ -19,22 +19,21 @@ def load_and_preprocess_raw_perf(perf_path, gaussian_sigma=0.5):
     image = sitk.ReadImage(perf_path)
     image = reorient_to_ras(image)
     image_array = sitk.GetArrayFromImage(image)
-    volumes = downsample_image(image_array) 
-    # volumes = motion_correction(volumes)
+
+    # Create time index (in seconds) based on the number of timepoints and scan interval
+    time_index = [i * SCAN_INTERVAL for i in range(image_array.shape[0])] 
+
+    volumes, time_index = downsample_image(image_array, time_index) 
+    volumes = motion_correction(volumes)
 
     # Convert the 4D array into a list of 3D arrays and corresponding time indices for easier processing
     volume_list = []
-    time_index = []
     for timepoint in range(volumes.shape[0]):
         volume = volumes[timepoint, :, :, :]
         volume_list.append(volume)
-        time_index.append(timepoint)
     
     # Smooth the input volumes to reduce noise and make results more stable
     volume_list = [gaussian_filter(volume, sigma=gaussian_sigma) for volume in volume_list]
-
-    # Convert time index to seconds using the scan interval.
-    time_index = [i * SCAN_INTERVAL for i in time_index]
         
     return volume_list, time_index
 
@@ -63,9 +62,9 @@ def reorient_to_ras(image):
     When arrays are extracted from the image, they will all be in the same orientation.
     
     Parameters:
-        image: A SimpleITK image object (3D or 4D)
+        - image (sitk.image): A SimpleITK image object (3D or 4D)
     Returns:
-        SimpleITK image object with updated direction matrix
+        - image (sitk.image): A SimpleITK image object with updated direction matrix
     """
 
     array = sitk.GetArrayFromImage(image)
@@ -84,7 +83,7 @@ def reorient_to_ras(image):
     return image
 
 
-def downsample_image(image_array, t_limit=50, z_limit=20, y_limit=250, x_limit=250):
+def downsample_image(image_array, time_index=None, t_limit=100, z_limit=25, y_limit=250, x_limit=250):
     """
     Downsample a 3D or 4D image array to reduce dimensions if they exceed specified limits.
     For spatial dimensions (x, y), maintains aspect ratio when downsampling. For temporal 
@@ -92,13 +91,15 @@ def downsample_image(image_array, t_limit=50, z_limit=20, y_limit=250, x_limit=2
     We opt for downsampling instead of interpolation to significantly reduce computation time.
     
     Parameters:
-        image_array (numpy.ndarray): 3D or 4D image array to downsample (z, y, x) or (t, z, y, x)
-        t_limit (int, optional): Maximum time dimension size.
-        z_limit (int, optional): Maximum z dimension size.
-        y_limit (int, optional): Maximum y dimension size.
-        x_limit (int, optional): Maximum x dimension size.
+        - image_array (numpy.ndarray): 3D or 4D image array to downsample (z, y, x) or (t, z, y, x)
+        - time_index (list, optional): List of time indices in seconds corresponding to each volume.
+        - t_limit (int, optional): Maximum time dimension size.
+        - z_limit (int, optional): Maximum z dimension size.
+        - y_limit (int, optional): Maximum y dimension size.
+        - x_limit (int, optional): Maximum x dimension size.
     Returns:
-        numpy.ndarray: Downsampled image array with reduced dimensions
+        - downsampled_image (nd.array): downsampled image array with reduced dimensions
+        - downsampled_time_index (list, optional): Downsampled time index if 4D array and time_index provided
     """
 
     def generate_indices(original_size, target_size):
@@ -137,6 +138,11 @@ def downsample_image(image_array, t_limit=50, z_limit=20, y_limit=250, x_limit=2
         # Downsample the image by keeping only the voxels at the generated indices
         downsampled_image = image_array[np.ix_(*indices)]
         
+        # If time_index is provided, downsample it using the same indices as the time dimension
+        if time_index is not None:
+            downsampled_time_index = [time_index[i] for i in indices[0]]
+            return downsampled_image, downsampled_time_index
+        
         return downsampled_image
 
     if image_array.ndim == 3:
@@ -165,13 +171,11 @@ def motion_correction(image_array, type_of_transform='QuickRigid'):
     Registration is done using ANTsPy with the specified transformation type.
     
     Parameters:
-        image_array (numpy.ndarray): 4D numpy array with shape (t, z, y, x)
-                                   representing the image sequence to be motion corrected
-        type_of_transform (str, optional): Type of transformation for registration. 
-                                         Defaults to 'QuickRigid'.
+        - image_array (nd.array): 4D numpy array with shape (t, z, y, x) representing the image sequence to be motion corrected
+        - type_of_transform (str, optional): Type of transformation for registration.
     Returns:
-        numpy.ndarray: Motion-corrected 4D numpy array with the same shape as input,
-                      where all volumes are aligned to the first volume as reference
+        - motion_corrected_array (nd.array): Motion-corrected 4D numpy array with the same shape as input,
+            where all volumes are aligned to the first volume as reference
     """
     
     # Convert the 4D numpy array a list of 3D ANTs images

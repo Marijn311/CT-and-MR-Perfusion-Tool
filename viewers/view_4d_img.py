@@ -13,8 +13,8 @@ def view_4d_img(img_list, title, projection, vmin=0, vmax=100):
         - title (str): Title for the visualization window
         - projection (str):          'min' for minimum intensity projection, 
                                      'max' for maximum intensity projection.
-        - vmin (int, optional): Lower percentile for colormap scaling. Defaults to 0.
-        - vmax (int, optional): Upper percentile for colormap scaling. Defaults to 100.
+        - vmin (int, optional): Lower percentile for colormap scaling.
+        - vmax (int, optional): Upper percentile for colormap scaling. 
     Controls:
         - Mouse wheel: Navigate through time points
         - Slider: Navigate through slices

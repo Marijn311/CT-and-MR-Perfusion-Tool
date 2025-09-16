@@ -45,7 +45,7 @@ def core(perf_path, mask_path=None):
     volume_list, time_index = load_and_preprocess_raw_perf(perf_path)
 
     if DEBUG:
-        view_4d_img(volume_list, title=f"Input {IMAGE_TYPE.upper()} After Preprocessing", projection=PROJECTION, vmin=1, vmax=99)
+        view_4d_img(volume_list, title=f"Input {IMAGE_TYPE.upper()} After Preprocessing", projection=PROJECTION, vmin=1, vmax=95)
 
     # ---------------------------------------------------------------------------------
     # Step 2: Brain Mask Generation
@@ -70,7 +70,7 @@ def core(perf_path, mask_path=None):
     ctc_volumes, s0_index, bolus_data = extract_ctc(volume_list, mask) 
   
     if DEBUG == True:
-            view_contrast_curve(bolus_data, s0_index)
+            view_contrast_curve(bolus_data, time_index, s0_index)
             view_4d_img(ctc_volumes, title="Contrast Signal", projection='max')
 
     # ---------------------------------------------------------------------------------

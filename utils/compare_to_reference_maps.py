@@ -146,10 +146,11 @@ def calculate_similarity_metrics(generated, reference, apply_mask):
     gen_valid = gen_flat[valid_mask]
     ref_valid = ref_flat[valid_mask]
     
+     
     # Calculate NCC (Normalized Cross-Correlation)
     gen_norm = (gen_valid - np.mean(gen_valid)) / np.std(gen_valid)
     ref_norm = (ref_valid - np.mean(ref_valid)) / np.std(ref_valid)
-    ncc = np.mean(gen_norm * ref_norm)
+    ncc = np.nanmean(gen_norm * ref_norm)
     
     # Calculate SSIM
     # SSIM requires 2D images with finite values because it uses a 2D kernel.
@@ -157,11 +158,26 @@ def calculate_similarity_metrics(generated, reference, apply_mask):
     # Note that the SSIM will be quite high because we are comparing the same background values.
     generated_masked = np.where(np.isfinite(generated_masked), generated_masked, 0)
     reference_masked = np.where(np.isfinite(reference_masked), reference_masked, 0)
-    # Calculate data range using 1st and 99th percentile to avoid outliers influencing the SSIM's internal normalization
-    gen_p1, gen_p99 = np.percentile(generated_masked[np.isfinite(generated_masked)], [1, 99])
-    ref_p1, ref_p99 = np.percentile(reference_masked[np.isfinite(reference_masked)], [1, 99])
-    data_range = max(gen_p99, ref_p99) - min(gen_p1, ref_p1)
-    ssim_value = ssim(generated_masked, reference_masked, data_range=data_range)
+
+    ssim_values = []    
+    for slice_idx in range(generated_masked.shape[0]):
+        gen_slice = generated_masked[slice_idx, :, :]
+        ref_slice = reference_masked[slice_idx, :, :]
+
+        # Calculate data range using 1st and 99th percentile to avoid outliers influencing the SSIM's internal normalization
+        gen_p1, gen_p99 = np.percentile(gen_slice[np.isfinite(gen_slice)], [1, 99])
+        ref_p1, ref_p99 = np.percentile(ref_slice[np.isfinite(ref_slice)], [1, 99])
+        data_range = max(gen_p99, ref_p99) - min(gen_p1, ref_p1)
+
+        if data_range == 0:
+            print("There is a slice with zero data range, skipping SSIM for this slice.")
+            continue  # Skip this slice if data range is zero to avoid division by zero
+
+        ssim_value = ssim(gen_slice, ref_slice, data_range=data_range)
+        ssim_values.append(ssim_value)
+    
+    # Take the average SSIM across all slices
+    ssim_value = np.nanmean(ssim_values)
 
     # Calculate MSE and MAE 
     mse = mean_squared_error(ref_valid, gen_valid)
@@ -218,8 +234,8 @@ def average_metrics_on_dataset(all_metrics):
             if values:  # Only calculate if we have values
                 # Calculate statistics
                 averaged_metrics[map_type][sim_metric] = {
-                    'mean': np.mean(values),
-                    'median': np.median(values),
+                    'mean': np.nanmean(values),
+                    'median': np.nanmedian(values),
                     'std': np.std(values),
                     'count': len(values)  # Add count to show how many subjects contributed
                 }

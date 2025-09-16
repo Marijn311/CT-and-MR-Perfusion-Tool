@@ -15,7 +15,7 @@ def extract_ctc(volume_list, mask, bolus_threshold=0.01):
         - volume_list (list): A list of 3D nd.array (z,y,x) images representing a time series of perfusion data.
         - mask (nd.array): 3D (z,y,x) binary brain mask.
         - bolus_threshold (float, optional): The threshold for the ratio of contrast agent signal change 
-                                        to determine the starting index. Defaults to 0.01.
+                                        to determine the starting index.
 
     Returns:
         - volume_list (list): A list of 3D nd.array (z,y,x) images representing the contrast agent signal over time.
@@ -124,7 +124,7 @@ def generate_ttp(ctc_volumes, time_index, s0_index, mask, outside_value=-1):
         - time_index (list): list of time indexes corresponding to each timepoint in ctc_volumes.
         - s0_index (int): Starting index for analysis. Time points before this index are excluded from TTP calculation (e.g., baseline measurements).
         - mask (nd.array): Binary 3D nd.array (z,y,x) of the brain mask.
-        - outside_value (int or float, optional): Value assigned to voxels outside the brain mask. Default is -1.
+        - outside_value (int or float, optional): Value assigned to voxels outside the brain mask.
     
     Returns
         - TTP (nd.array): 3D nd.array (z,y,x) of time to peak map with the same spatial dimensions as the input 
@@ -150,7 +150,7 @@ def generate_ttp(ctc_volumes, time_index, s0_index, mask, outside_value=-1):
 
 
 
-def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, method='SVD', SVD_truncation_threshold=0.1, oSVD_OI_threshold=0.035, outside_value=-1, rho=1.05, hcf=0.73):
+def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, method='bcSVD1', SVD_truncation_threshold=0.1, oSVD_OI_threshold=0.035, outside_value=-1, rho=1.05, hcf=0.73):
     """
     Generate perfusion maps (MTT, CBV, CBF, Tmax) from contrast time curves (CTC) via deconvolution with the arterial input function (AIF).
     This function supports multiple SVD-based deconvolution methods.
@@ -162,12 +162,12 @@ def generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties, metho
         - time_index (list): list of time indexes corresponding to the ctc_volumes.
         - mask (nd.array): 3D binary brain mask (z,y,x).
         - aif_properties (nd.array): 1D array with 4 elements representing the parameters of the fitted gamma variate function for the AIF.
-        - method (str, optional): Which deconvolution method to use, either 'bcSVD1', 'bcSVD2', 'SVD', 'oSVD', or 'boxNLR' (default: 'SVD')
-        - SVD_truncation_threshold (float, optional): threshold for svd regularization as fraction of maximum singular value (default: 0.1)
-        - oSVD_OI_threshold (float, optional): threshold for oscillation index in oSVD method (default: 0.035)
-        - outside_value (float, optional): Value assigned to voxels outside the brain mask (default: -1)
-        - rho (float, optional): Tissue density in g/ml (default: 1.05 g/ml)
-        - hcf (float, optional): Hematocrit correction factor (default: 0.73)
+        - method (str, optional): Which deconvolution method to use, either 'bcSVD1', 'bcSVD2', 'SVD', 'oSVD', or 'boxNLR'
+        - SVD_truncation_threshold (float, optional): threshold for svd regularization as fraction of maximum singular value
+        - oSVD_OI_threshold (float, optional): threshold for oscillation index in oSVD method 
+        - outside_value (float, optional): Value assigned to voxels outside the brain mask 
+        - rho (float, optional): Tissue density in g/ml 
+        - hcf (float, optional): Hematocrit correction factor 
     Returns:
         - mtt (nd.array): 3D array (z,y,x) containing the Mean Transit Time in seconds
         - cbv (nd.array): 3D array (z,y,x) containing the Cerebral Blood Volume in ml/100g 

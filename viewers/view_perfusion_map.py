@@ -8,8 +8,8 @@ def view_perfusion_map(volume, title, vmin=0, vmax=100):
     Parameters:
         - volume (nd.array): 3D array containing the perfusion data.
         - title (str): Title to display on the plot.
-        - vmin (float, optional): Lower percentile for color scaling. Defaults to 0.
-        - vmax (float, optional): Upper percentile for color scaling. Defaults to 100.
+        - vmin (float, optional): Lower percentile for color scaling.
+        - vmax (float, optional): Upper percentile for color scaling.
     Controls:
         - Mouse wheel: Navigate through time points
         - Arrow keys: Navigate through time points

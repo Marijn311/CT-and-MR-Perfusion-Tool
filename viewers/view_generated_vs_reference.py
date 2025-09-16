@@ -12,8 +12,8 @@ def view_generated_vs_reference(generated, reference, title, apply_mask, vmin=0,
         - reference (nd.array): 3D array (z,y,x) containing the reference perfusion map data
         - title (str): Title for the comparison display
         - apply_mask (bool): If True, apply a mask to only compare voxels that are not background/nan/inf in both maps.
-        - vmin (float, default=0): Lower percentile for contrast scaling
-        - vmax (float, default=100): Upper percentile for contrast scaling
+        - vmin (float, optional): Lower percentile for contrast scaling
+        - vmax (float, optional): Upper percentile for contrast scaling
 
     Controls:
         - Mouse wheel: Navigate through time points

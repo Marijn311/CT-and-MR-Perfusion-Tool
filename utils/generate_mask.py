@@ -7,6 +7,7 @@ from utils.load_and_preprocess import reorient_to_ras
 from skimage.morphology import disk, binary_erosion, binary_dilation
 
 
+
 def generate_mask_ctp(volume, perf_path, bone_threshold=300, fast_marching_threshold=400):
     """
     Generate a brain mask from a 3D CT perfusion volume.
@@ -99,42 +100,24 @@ def generate_mask_mrp(volume, perf_path, brain_threshold=100):
     # Perform the segmentation using active contours
     mask = segmentation.morphological_chan_vese(volume, num_iter=300, init_level_set=seed_mask).astype(float)
     
-    # Refine the mask with slice-wise morphological operations 
-    for s in range(volume.shape[0]):
-        mask_slice = mask[s, :, :] 
 
-        # Sometimes a bit of the skull is still included in the segmentation of the active contour.
-        # This may happen if the skull seems to touch the brain for example. 
-        # To remove these skull fragments, we erode the mask a bit. 
-        # This will hopefully un-connect the skull fragments from the brain.
-        # Then we remove all components that are not attached to the main component (which is the brain).  
-        # Then we dilate the mask again to get the original size of the brain mask back.
-        # This also smooths the mask a bit.
-        structure_element = disk(5)
-        mask_slice = binary_erosion(mask_slice, structure_element)
-        labeled_mask = measure.label(mask_slice)
-        regions = measure.regionprops(labeled_mask)
-        
-        if regions:
-            areas = [region.area for region in regions]
-            max_area_idx = np.argmax(areas)
-            max_area = areas[max_area_idx]   # Find the largest component
-    
-            for region in regions:
-                if region.area < max_area: # Remove smaller components
-                    mask_slice[labeled_mask == region.label] = 0
-        
-        mask_slice = binary_dilation(mask_slice, structure_element)
+    # Sometimes a bit of the skull is still included in the segmentation of the active contour.
+    # This may happen if the skull seems to touch the brain for example. 
+    # To detach these skull fragments, we erode the mask a bit. 
+    # This will hopefully un-connect the skull fragments from the brain.
+    # Then we remove all components that are not attached to the main component (which is the brain).  
+    # Then we dilate the mask again to get the original size of the brain mask back.
+    # This also smooths the mask a bit.
 
-        # Fill holes in the slice and replace the mask slice with the post-processed slice
-        mask[s, :, :] = binary_fill_holes(mask_slice)
-    
-    # Remove all components that are not attached to the main component in 3D.
-    # One of the lower slices may have some small components, the slice-wise processing keeps the largest component per slice,
-    # but these components may not be connected to the actual brain in 3D.   
+    # Use a disk structuring element for 2D slices and extend it to 3D.
+    # Since we have way fewer slices in z-direction, we only erode/dilate in x and y direction
+    struct_elem = disk(4)
+    struct_elem = struct_elem[np.newaxis, :, :] # Make it 3D
+    mask = binary_erosion(mask, struct_elem)
     labeled_mask_3d = measure.label(mask)
     regions_3d = measure.regionprops(labeled_mask_3d)
     
+    # If there are regions found, keep only the largest one (the brain)
     if regions_3d:
         areas_3d = [region.area for region in regions_3d]
         max_area_idx_3d = np.argmax(areas_3d)
@@ -144,6 +127,9 @@ def generate_mask_mrp(volume, perf_path, brain_threshold=100):
         for region in regions_3d:
             if region.area < max_area_3d:
                 mask[labeled_mask_3d == region.label] = 0
+    
+    mask = binary_dilation(mask, struct_elem)
+    mask = binary_fill_holes(mask)
 
     mask = mask.astype(np.uint8)
     
@@ -152,9 +138,7 @@ def generate_mask_mrp(volume, perf_path, brain_threshold=100):
     mask_sitk = sitk.GetImageFromArray(mask)
 
     # Set the orientation to RAS
-    mask_sitk.SetDirection((1.0, 0.0, 0.0,
-                    0.0, 1.0, 0.0,
-                    0.0, 0.0, 1.0))
+    mask_sitk = reorient_to_ras(mask_sitk)
     sitk.WriteImage(mask_sitk, mask_path)
 
     

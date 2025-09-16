@@ -11,8 +11,8 @@ def view_mask(mask, volume_list, vmin=0, vmax=100):
     Parameters:
         - mask: 3D numpy array representing the brain mask
         - volume_list: List of 3D nd.array perfusion volumes (z,y,x)
-        - vmin (int, optional): Lower percentile for intensity scaling. Defaults to 0.
-        - vmax (int, optional): Upper percentile for intensity scaling. Defaults to 100.
+        - vmin (int, optional): Lower percentile for intensity scaling.
+        - vmax (int, optional): Upper percentile for intensity scaling. 
     Controls:
         - Mouse wheel: Navigate through slices
         - Time slider: Navigate through time points
