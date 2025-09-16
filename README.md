@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/logo_wobble.gif" width="300">
+  ![Image](https://github.com/user-attachments/assets/3552f3fe-cb01-4fac-8cf5-c42add80aba9)
 </div>
 
 
