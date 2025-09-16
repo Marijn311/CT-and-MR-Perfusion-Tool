@@ -1,15 +1,15 @@
 
-DATASET_PATH = r"demo_data_olea"         # Path to the dataset directory containing CTP scans
-IMAGE_TYPE = 'mrp'                          # Either 'mrp' or 'ctp'. NOTE: CTP implementation is based in iodine contrast scans, MRP on gadolinium contrast DSC scans.
-SCAN_INTERVAL = 1.41                         # Time between two 3D consecutive volumes in seconds
-ECHO_TIME = 0.03                            # Echo time in seconds (only for MRP)
+DATASET_PATH = r"demo_data_olea"        # Path to the dataset directory containing CTP scans
+IMAGE_TYPE = 'mrp'                      # Either 'mrp' or 'ctp'. NOTE: CTP implementation is based in iodine contrast scans, MRP on gadolinium contrast DSC scans.
+SCAN_INTERVAL = 1.41                    # Time between two 3D consecutive volumes in seconds
+ECHO_TIME = 0.03                        # Echo time in seconds (only for MRP)
 
 #--------------------------------------------------------------------------
 
-DEBUG = False                                # if True, shows plots during processing to visualize intermediate results
-GENERATE_PERFUSION_MAPS = False              # If True, generates perfusion maps from the inputted perfusion data
+DEBUG = False                                # If True, activates debug mode which shows plots during processing to visualize intermediate results
+GENERATE_PERFUSION_MAPS = False              # If True, generates perfusion maps from the inputted raw 4D perfusion data
 SHOW_COMPARISONS = False                     # If True, shows comparison plots between generated and reference perfusion maps
-CALCULATE_METRICS = True                    # If True, calculates similarity metrics between generated and reference perfusion maps
+CALCULATE_METRICS = True                     # If True, calculates similarity metrics between generated and reference perfusion maps
 
 # --------------------------------------------------------------------------
 

@@ -6,19 +6,49 @@
 
 ## Introduction
 
-This repository contains PyPeT (Python Perfusion Tool): a open Python tool for generating perfusion maps from head CTP scans using deconvolution methods. See the attached arXiv paper for an in-depth description of the processing steps and visual comparisons with a FDA-approved tools.
+**PyPeT** is an open-source Python-based tool for automated quantitative analysis of brain CT and MR perfusion imaging. It generates standard perfusion maps including **cerebral blood flow (CBF), cerebral blood volume (CBV), mean transit time (MTT), time-to-peak (TTP), and time-to-maximum (Tmax)** from raw 4D perfusion data.  
 
-The tool supports multiple deconvolution methods:
-- **oSVD**: Original Singular Value Decomposition using Toeplitz matrix
-- **bcSVD1**: Block-circulant SVD method 1 with padding
-- **bcSVD2**: Block-circulant SVD method 2 with custom matrix construction  
-- **nlr**: Non-linear regression using boxNLR model (Bennink et al.)
+Unlike many commercial tools, PyPeT is free, transparent, and designed with modularity and customizability in mind. It supports both **CT Perfusion (CTP)** and **MR Perfusion (MRP)** within a unified framework, making it broadly applicable in cerebrovascular research.  
 
-**DISCLAIMER**: This algorithm has **not been formally validated** and is **not intended for clinical use**.
+For a detailed description of the pipeline and the validation experiments, please read the attached technical report.
+
+## Key Features
+- **Open and extensible**: Python implementation with clear structure, strong modularity, and extensive documentation  
+- **Low computational requirements**: Runs in seconds on a standard laptop, no GPU needed  
+- **Debug mode**: Step-by-step visualization of preprocessing, arterial input function (AIF) selection, and deconvolution steps  
+- **Validation**: Outputs benchmarked against multiple FDA-approved software package, showing strong correspondence (SSIM ~0.75–0.85)  
+
+⚠️ **Note**: PyPeT is intended for **research use only** and is not validated for clinical deployment.  
+
+## Cite
+Borghouts M, Su R. *PyPeT: A Python Perfusion Tool for Automated Quantitative Brain CT and MR Perfusion Analysis*. Eindhoven University of Technology. [insert arXiv DOI]
+
+<div align="center">
+  <img src="output_comparison.gif" width="600">
+</div>
+
+
+## SETUP:
+1. **Create and activate a venv**<br>
+```
+conda create --name pypet python==3.10<br>
+conda activate pypet
+```
+
+2. **Clone this repository**<br> 
+```
+git clone https://github.com/Marijn311/CT-and-MR-Perfusion-Tool.git
+```
+
+3. **Install requirements**<br>
+```cd CT-and-MR-Perfusion-Tool<br>
+pip3 install -r requirements.txt
+```
 
 ## Data Structure
 
-This tool expects input data to follow a specific directory structure format. The expected structure is demonstrated in the `demo_data` folder:
+This tool expects input data to follow a specific directory structure. The expected structure is demonstrated in the `demo_data` folder.
+Though with some tweaking of main.py you may use other dataset structures.
 
 ```
 data/
@@ -33,41 +63,48 @@ data/
 │           └── sub-<subject_id>_ses-<session_id>_tmax.nii.gz # Time to Maximum
 ```
 
-This tool can either generate brain masks using a thresholding and fast-marching approach, or you may provide your own brain mask.
+You may provide your own brain mask, if no brain mask is provided, the tool will generate brain masks.
 
-## Configuration
+## Configuration and Running 
 
-The tool is configured via the `config.py` file. Key parameters include:
+The tool is configured via the `config.py` file. These setting should speak for themselves.
+Other parameters such as the deconvolution method or a variety of thresholds can ussually be set in the arguments of the respective functions in the utils folder.  By running the main.py script you can generate the perfusion maps for an entire dataset automatically and at the same time compare these outputs agaisnt reference maps if provided. Alternatively you can just take the "core()" function to generate perfusion maps for a single input image.  
 
-- **METHOD**: Deconvolution method ('oSVD', 'bcSVD1', 'bcSVD2', or 'nlr')
-- **DATASET_PATH**: Path to your data directory
-- **SCAN_INTERVAL**: Time between consecutive 3D volumes (seconds)
-- **DEBUG**: Enable visualization of intermediate results
-- **CSVD_THRES**: SVD threshold for regularization (SVD methods only)
-- **NLR_MAX_ITER**: Maximum iterations for NLR optimization (NLR method only)
-- **NLR_TOL**: Convergence tolerance for NLR (NLR method only)
 
-Example configuration for NLR method:
-```python
-METHOD = 'nlr'
-NLR_MAX_ITER = 1000
-NLR_TOL = 1e-6
-```
+## Configuration and Running
 
-Note: The NLR method typically takes longer than SVD methods but may provide more robust results in noisy conditions.
+The PyPeT tool is configured through the `config.py` file, settings should be self-explanatory.  
+Additional parameters, such as the choice of deconvolution method or threshold values, can be adjusted in the arguments of the respective functions within the `utils` folder.  
 
-## Citation
+To process a dataset, run the `main.py` script. This will automatically generate perfusion maps for all inputted perfusion scans, and, if reference maps are available, compare the outputs against them. For single-image processing, you can instead call the `core()` function directly to generate perfusion maps from one input file.
 
-If you use this tool, please cite: "PyPeT: A Python Tool for Automated Quantitative Brain CT Perfusion Analysis and Visualization" [insert arXiv DOI]
+## Keywords for search optimization
+### python 
+### open-source 
+### open 
+### perfusion 
+### perfusion-maps 
+### perfusion-analysis 
+### MRI 
+### MRP 
+### DSC 
+### CT 
+### CTP 
+### toolbox 
+### toolkit 
+### pipeline 
+### software 
+### package
+### medical-imaging 
+### neuroimaging 
+### brain 
+### analysis 
+### stroke 
+### CBV 
+### CBF 
+### MTT
+### TTP 
+### Tmax 
+### mr-perfusion 
+### ct-perfusion 
 
-## References
-
-This work was based on the tutorial by https://github.com/turtleizzy/ctp_csvd
-
-The cSVD deconvolution algorithm was implemented based on:
-- https://github.com/SethLirette/CTP 
-- https://github.com/marcocastellaro/dsc-mri-toolbox
-- Zanderigo F, Bertoldo A, Pillonetto G, Cobelli C. Nonlinear stochastic regularization to characterize tissue residue function in bolus-tracking MRI: assessment and comparison with SVD, block-circulant SVD, and Tikhonov. IEEE Trans Biomed Eng. 2009;56(5):1287-97. doi: 10.1109/TBME.2009.2013820.
-
-The NLR (Non-Linear Regression) method uses a box-shaped residue function and optimization techniques:
-- Bennink E, Oosterbroek J, Kudo K, Viergever MA, Velthuis BK, de Jong HWAM. Fast nonlinear regression method for CT brain perfusion analysis. J Med Imaging (Bellingham). 2013;1(2):026001. doi: 10.1117/1.JMI.1.2.026001.
