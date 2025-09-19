@@ -98,11 +98,11 @@ def core(perf_path, mask_path=None):
     mtt, cbv, cbf, tmax = generate_perfusion_maps(ctc_volumes, time_index, mask, aif_properties)
 
     if DEBUG == True:
-        view_perfusion_map(ttp, "TTP", vmin=1, vmax=99)
-        view_perfusion_map(cbf, "CBF", vmin=1, vmax=99)
-        view_perfusion_map(cbv, "CBV", vmin=1, vmax=99)
-        view_perfusion_map(mtt, "MTT", vmin=1, vmax=99)
-        view_perfusion_map(tmax, "TMAX", vmin=1, vmax=99)
+        view_perfusion_map(ttp, "TTP", vmin=2, vmax=98)
+        view_perfusion_map(cbf, "CBF", vmin=2, vmax=98)
+        view_perfusion_map(cbv, "CBV", vmin=2, vmax=98)
+        view_perfusion_map(mtt, "MTT", vmin=2, vmax=98)
+        view_perfusion_map(tmax, "TMAX", vmin=2, vmax=98)
 
     # ---------------------------------------------------------------------------------
     # Step 7: Post-processing (Whole brain normalization)

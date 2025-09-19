@@ -32,7 +32,7 @@ Borghouts M, Su R. *PyPeT: A Python Perfusion Tool for Automated Quantitative Br
 ## SETUP:
 1. **Create and activate a venv**<br>
 ```
-conda create --name pypet python==3.10<br>
+conda create --name pypet python==3.10
 conda activate pypet
 ```
 
@@ -42,7 +42,8 @@ git clone https://github.com/Marijn311/CT-and-MR-Perfusion-Tool.git
 ```
 
 3. **Install requirements**<br>
-```cd CT-and-MR-Perfusion-Tool<br>
+```
+cd CT-and-MR-Perfusion-Tool
 pip3 install -r requirements.txt
 ```
 

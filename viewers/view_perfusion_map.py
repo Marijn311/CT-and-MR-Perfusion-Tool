@@ -49,6 +49,7 @@ def view_perfusion_map(volume, title, vmin=0, vmax=100):
 
     fig.canvas.mpl_connect('scroll_event', on_scroll)
     fig.canvas.mpl_connect('key_press_event', on_key)
+    plt.axis('off')
     plt.show()
 
 
