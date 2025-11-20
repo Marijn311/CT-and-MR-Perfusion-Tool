@@ -26,6 +26,7 @@ For a detailed description of the pipeline and the validation experiments, pleas
 
 ## Cite
 If you use this tool in your research, please cite 
+
 Borghouts M, Su R. *PyPeT: A Python Perfusion Tool for Automated Quantitative Brain CT and MR Perfusion Analysis*. 
 [arXiv](https://doi.org/10.48550/arXiv.2511.13310)
 
