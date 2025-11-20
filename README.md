@@ -25,7 +25,9 @@ For a detailed description of the pipeline and the validation experiments, pleas
 ⚠️ **Note**: PyPeT is intended for **research use only** and is not validated for clinical deployment.  
 
 ## Cite
-Borghouts M, Su R. *PyPeT: A Python Perfusion Tool for Automated Quantitative Brain CT and MR Perfusion Analysis*. Eindhoven University of Technology. [insert arXiv DOI]
+If you use this tool in your research, please cite 
+Borghouts M, Su R. *PyPeT: A Python Perfusion Tool for Automated Quantitative Brain CT and MR Perfusion Analysis*. 
+[arXiv](https://doi.org/10.48550/arXiv.2511.13310)
 
 
 
