@@ -70,12 +70,6 @@ data/
 
 You may provide your own brain mask, if no brain mask is provided, the tool will generate brain masks.
 
-## Configuration and Running 
-
-The tool is configured via the `config.py` file. These setting should speak for themselves.
-Other parameters such as the deconvolution method or a variety of thresholds can ussually be set in the arguments of the respective functions in the utils folder.  By running the main.py script you can generate the perfusion maps for an entire dataset automatically and at the same time compare these outputs agaisnt reference maps if provided. Alternatively you can just take the "core()" function to generate perfusion maps for a single input image.  
-
-
 ## Configuration and Running
 
 The PyPeT tool is configured through the `config.py` file, settings should be self-explanatory.  
